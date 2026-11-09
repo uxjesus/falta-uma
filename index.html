@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Falta Uma</title>
+<meta name="description" content="O que falta comprar para fechar seus decks de Magic.">
+<meta name="theme-color" content="#1e1f22" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#fafafa" media="(prefers-color-scheme: light)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="preconnect" href="https://cards.scryfall.io">
+<style>
+/* Falta Uma v0.4 — estrutura inspirada no Moxfield (listas limpas por tipo, cabeçalho enxuto,
+   ações numa barra flutuante). Cores, ícones e marca próprios. Contraste AAA conferido. */
+:root{
+  --bg:#fafafa; --surface:#ffffff; --surface-2:#eeeff1; --line:#dcdde0; --line-strong:#6b6e75;
+  --text:#18191b; --muted:#45474c; --accent:#6b4500; --on-accent:#ffffff; --accent-soft:#f6ecd6;
+  --miss:#9a1c0c; --ok:#14612f; --focus:#6b4500; --hover:#f1f2f4;
+  --scrim:linear-gradient(180deg,rgba(10,10,12,.25) 0%,rgba(10,10,12,.7) 55%,rgba(10,10,12,.95) 100%);
+  --r-sm:8px; --r:12px; --r-pill:999px; --tap:44px;
+  --font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"Roboto Mono",Menlo,Consolas,monospace;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#1e1f22; --surface:#28292d; --surface-2:#313237; --line:#3a3b41; --line-strong:#8a8d95;
+    --text:#e8e8e8; --muted:#b4b6bb; --accent:#f2c75c; --on-accent:#1f1600; --accent-soft:#3a3222;
+    --miss:#ff9e8f; --ok:#86d9a0; --focus:#f2c75c; --hover:#26272b;
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-padding-top:64px}
+body{margin:0;background:var(--bg);color:var(--text);font:400 1rem/1.4 var(--font);
+  padding-bottom:calc(80px + env(safe-area-inset-bottom));-webkit-tap-highlight-color:transparent}
+a{color:var(--accent)}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px;border-radius:4px}
+main:focus{outline:none}
+img{max-width:100%}
+p{margin:0}
+h1,h2,h3{margin:0}
+.skip{position:absolute;left:-999px;top:0}
+.skip:focus{left:8px;top:8px;background:var(--surface);padding:12px;z-index:30;border-radius:8px}
+.visually-hidden{position:absolute!important;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.muted{color:var(--muted)} .small{font-size:.875rem} .xs{font-size:.8125rem}
+
+/* barra do app: só marca + ícones */
+.appbar{position:sticky;top:0;z-index:10;background:var(--bg);border-bottom:1px solid var(--line)}
+.appbar .in{max-width:880px;margin:0 auto;padding:4px 4px 4px 16px;display:flex;align-items:center;gap:4px;min-height:56px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.02em;text-transform:uppercase;font-size:.9375rem;text-decoration:none;color:var(--text)}
+.brand img{width:26px;height:26px;border-radius:6px}
+.appbar .spacer{flex:1}
+.wrap{max-width:880px;margin:0 auto}
+
+/* botões */
+.btn{min-height:var(--tap);padding:0 16px;border-radius:var(--r-sm);border:1px solid var(--line-strong);background:transparent;
+  font-weight:700;font-size:.9375rem;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;color:var(--text);
+  transition:transform .08s ease,background-color .15s ease;white-space:nowrap}
+.btn:active{transform:scale(.97)}
+.btn.primary{background:var(--accent);color:var(--on-accent);border-color:var(--accent)}
+.btn.full{width:100%}
+.ib{min-width:var(--tap);min-height:var(--tap);border:0;background:none;border-radius:var(--r-pill);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text);text-decoration:none}
+.ib:active{background:var(--surface-2)}
+.ib .icon{width:22px;height:22px}
+.icon{width:20px;height:20px;flex:none}
+.link{border:0;background:none;padding:0 4px;min-height:var(--tap);display:inline-flex;align-items:center;gap:6px;color:var(--accent);font-weight:700;font-size:.9375rem;cursor:pointer;text-decoration:none}
+
+/* cabeçalho da página (como o topo do deck no Moxfield: título + uma linha de meta) */
+.head{padding:16px 16px 4px}
+.head h1{font-size:1.75rem;line-height:1.15;font-weight:800;letter-spacing:-.02em}
+.metaline{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;margin-top:6px;color:var(--muted);font-size:.9375rem;font-weight:600}
+.metaline strong{color:var(--text)}
+.dot-ok,.dot-old{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px}
+.dot-ok{background:var(--ok)} .dot-old{background:var(--miss)}
+.badge{display:inline-flex;align-items:center;height:22px;padding:0 8px;border-radius:4px;background:var(--surface-2);color:var(--text);font-size:.6875rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+
+/* opções de exibição (linha discreta, como "View Options") */
+.opts{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 12px 0 16px;border-bottom:1px solid var(--line)}
+.opts select{appearance:none;border:0;background:transparent;min-height:var(--tap);padding:0 22px 0 0;font-weight:700;font-size:.9375rem;color:var(--accent);cursor:pointer;
+  background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);
+  background-position:calc(100% - 9px) 21px,calc(100% - 4px) 21px;background-size:5px 5px;background-repeat:no-repeat;max-width:60vw;text-overflow:ellipsis}
+.opts .grp{display:flex;align-items:center;gap:2px}
+.opts .tg{border:0;background:none;min-height:var(--tap);padding:0 10px;font-weight:700;font-size:.9375rem;color:var(--muted);cursor:pointer;border-radius:var(--r-sm)}
+.opts .tg[aria-pressed=true]{color:var(--text);background:var(--surface-2)}
+
+/* seções e linhas (núcleo do visual do Moxfield) */
+.sec{padding:14px 0 2px}
+.sec-h{display:flex;align-items:baseline;gap:8px;padding:0 16px 4px;font-size:1rem;font-weight:800}
+.sec-h .c{color:var(--muted);font-weight:700}
+.sec-h .sum{margin-left:auto;color:var(--muted);font-weight:650;font-size:.875rem}
+.rows{list-style:none;margin:0;padding:0}
+.r{display:grid;grid-template-columns:28px minmax(0,1fr) auto auto;align-items:center;column-gap:10px;min-height:var(--tap);padding:0 12px 0 16px}
+.r:active{background:var(--hover)}
+.r .q{font-weight:700;font-variant-numeric:tabular-nums;color:var(--text)}
+.r .q.miss{color:var(--miss)}
+.r .nm{background:none;border:0;padding:10px 0;text-align:left;cursor:pointer;color:var(--text);font-weight:500;line-height:1.25;min-height:var(--tap);min-width:0}
+.r .nm .d{display:block;color:var(--muted);font-weight:500;font-size:.8125rem;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.r .pr{font-variant-numeric:tabular-nums;font-weight:600;font-size:.9375rem;text-align:right;min-width:72px;white-space:nowrap;color:var(--text)}
+.r .pr.na{color:var(--muted);font-weight:500}
+.mana{display:inline-flex;gap:1px;align-items:center;justify-content:flex-end}
+.mana img{width:16px;height:16px;display:block}
+.mana .t{font-size:.6875rem;font-weight:800;border:1px solid var(--line-strong);border-radius:50%;min-width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;padding:0 2px}
+.flag{display:inline-block;font-size:.6875rem;font-weight:800;padding:0 6px;border-radius:4px;border:1px solid var(--miss);color:var(--miss);margin-left:6px;vertical-align:1px}
+
+/* marcador de posse no fim da linha (no lugar do botão redondo do Moxfield) */
+.own{min-width:var(--tap);min-height:var(--tap);border:0;background:none;padding:0;cursor:pointer;display:flex;align-items:center;justify-content:center;margin-right:-6px}
+.own i{font-style:normal;display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:24px;padding:0 6px;border-radius:var(--r-pill);font-weight:800;font-size:.75rem;font-variant-numeric:tabular-nums;border:1.5px solid var(--line-strong);color:var(--muted)}
+.own.part i{border-color:var(--miss);color:var(--miss)}
+.own.none i{border-color:var(--miss);color:var(--miss)}
+.own.done i{border-color:var(--ok);background:var(--ok);color:var(--bg)}
+
+/* barra flutuante de ações (pílula, como a do Moxfield) */
+.fab{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(76px + env(safe-area-inset-bottom));z-index:11;display:flex;align-items:center;gap:4px;
+  background:var(--accent);color:var(--on-accent);border-radius:var(--r-pill);padding:4px;box-shadow:0 6px 20px rgba(0,0,0,.35);max-width:calc(100vw - 32px)}
+.fab button,.fab a{min-height:var(--tap);border:0;background:none;color:inherit;font-weight:800;font-size:.9375rem;padding:0 16px;border-radius:var(--r-pill);display:inline-flex;align-items:center;gap:8px;cursor:pointer;text-decoration:none;white-space:nowrap}
+.fab:empty{display:none}
+.fab .sep{width:1px;height:24px;background:currentColor;opacity:.35}
+.fab .only{padding:0;width:var(--tap);justify-content:center}
+.fab button:active,.fab a:active{background:rgba(0,0,0,.14)}
+
+/* barra de ferramentas (ícones pequenos + "Opções de exibição", como no Moxfield) */
+.tools{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 8px 2px 8px;border-bottom:1px solid var(--line)}
+.tools .ic{display:flex;align-items:center;gap:2px}
+.tools .ib{color:var(--text)}
+.tools .ib[disabled]{opacity:.45}
+.tools .link{font-size:.875rem;padding:0 8px}
+.tools .link .icon{width:18px;height:18px}
+.head.compact{padding:14px 16px 8px}
+.eyebrow{font-size:.8125rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.metaline.big{font-size:1.125rem;color:var(--text);margin-top:2px}
+.metaline.big strong{font-size:1.5rem;letter-spacing:-.02em}
+.sec-t{border:0;background:none;padding:0;min-height:var(--tap);display:inline-flex;align-items:center;gap:6px;font:inherit;font-weight:800;color:var(--text);cursor:pointer}
+.sec-t .chev{width:18px;height:18px;color:var(--muted);transition:transform .15s ease}
+.sec-t[aria-expanded=false] .chev{transform:rotate(-90deg)}
+.sec-h{align-items:center;padding-bottom:0}
+.chipline{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 8px 0 16px;font-size:.875rem;font-weight:650;color:var(--muted)}
+/* painel inferior */
+dialog.sheet{margin:auto auto 0;width:100%;max-width:560px;border-radius:16px 16px 0 0;max-height:85vh}
+dialog.sheet[open]{animation:up .18s ease-out}
+@keyframes up{from{transform:translateY(24px);opacity:0}to{transform:none;opacity:1}}
+.sheet-in{padding:8px 16px calc(16px + env(safe-area-inset-bottom));overflow:auto;max-height:85vh}
+.sheet-in::before{content:"";display:block;width:40px;height:4px;border-radius:99px;background:var(--line-strong);margin:4px auto 12px;opacity:.6}
+.sheet-in h2{font-size:1.125rem;margin:0 0 8px}
+.field-set{border:0;padding:0;margin:14px 0 0}
+.field-set legend{font-size:.8125rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;padding:0}
+.seg2{display:flex;flex-wrap:wrap;gap:8px}
+.seg2 button{min-height:var(--tap);padding:0 16px;border-radius:var(--r-pill);border:1px solid var(--line-strong);background:transparent;font-weight:700;cursor:pointer;color:var(--text);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.seg2 button[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.menu{list-style:none;margin:0;padding:0}
+.menu button{width:100%;display:flex;align-items:center;gap:14px;text-align:left;border:0;background:none;padding:12px 4px;min-height:56px;cursor:pointer;color:var(--text);font-weight:700;border-radius:var(--r-sm)}
+.menu button:active{background:var(--surface-2)}
+.menu button[disabled]{opacity:.45}
+.menu small{display:block;font-weight:500;color:var(--muted);font-size:.8125rem;margin-top:2px}
+.menu .icon{width:22px;height:22px;flex:none;color:var(--accent)}
+
+/* abas do deck */
+.tabsbar{position:sticky;top:57px;z-index:8;display:flex;background:var(--bg);border-bottom:1px solid var(--line)}
+.tabsbar button{flex:1;min-height:48px;border:0;background:none;font-weight:750;font-size:.9375rem;color:var(--muted);cursor:pointer;border-bottom:3px solid transparent}
+.tabsbar button[aria-selected=true]{color:var(--text);border-bottom-color:var(--accent)}
+.opts .ib[aria-pressed=true]{color:var(--accent);background:var(--surface-2)}
+.opts .ib{color:var(--muted)}
+.r.src .q .icon{width:20px;height:20px;color:var(--muted)}
+.r.rev{align-items:start;padding-top:8px;padding-bottom:8px}
+.r.rev input{min-height:44px}
+
+/* cabeçalho do deck com arte */
+.banner{position:relative;min-height:200px;display:flex;align-items:flex-end;color:#fff;background:#2b2c30;overflow:hidden}
+.banner img.art{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 25%}
+.banner .shade{position:absolute;inset:0;background:var(--scrim)}
+.banner .info{position:relative;padding:12px 16px 16px;width:100%}
+.banner h1{color:#fff;font-size:1.75rem;line-height:1.15;font-weight:800;letter-spacing:-.02em;margin:4px 0 8px;text-shadow:0 1px 3px rgba(0,0,0,.6)}
+.banner .badge{background:rgba(255,255,255,.18);color:#fff}
+.banner .metaline{color:#f0f0f0;margin-top:8px}
+.banner .metaline strong{color:#fff}
+.pips{display:inline-flex;gap:2px;vertical-align:middle}
+.pips img{width:18px;height:18px;filter:drop-shadow(0 1px 1px rgba(0,0,0,.6))}
+.meter{height:6px;background:rgba(255,255,255,.28);border-radius:99px;overflow:hidden;margin-top:10px}
+.meter>span{display:block;height:100%;background:#86d9a0}
+.back{display:inline-flex;align-items:center;gap:4px;min-height:36px;color:#fff;font-weight:700;text-decoration:none;font-size:.9375rem}
+
+/* lista de decks */
+.decklist{list-style:none;margin:0;padding:8px 16px;display:grid;gap:12px}
+@media (min-width:640px){.decklist{grid-template-columns:1fr 1fr}}
+.dk{display:block;text-decoration:none;color:var(--text);background:var(--surface);border-radius:var(--r);overflow:hidden}
+.dk:active{transform:scale(.99)}
+.dk .art{position:relative;height:112px;background:#2b2c30;overflow:hidden}
+.dk .art>img{width:100%;height:100%;object-fit:cover;object-position:center 25%;display:block}
+.dk .art .badge{position:absolute;left:10px;top:10px;background:rgba(10,10,12,.82);color:#fff}
+.dk .art .pips{position:absolute;right:10px;top:10px}
+.dk .body{padding:10px 14px 12px}
+.dk strong{display:block;font-size:1.0625rem;font-weight:800}
+.dk .ln{display:flex;justify-content:space-between;gap:8px;font-size:.875rem;font-weight:600;color:var(--muted);margin:2px 0 8px}
+.bar{height:6px;background:var(--surface-2);border-radius:99px;overflow:hidden}
+.bar>span{display:block;height:100%;background:var(--ok)}
+
+/* grade visual */
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px 10px;list-style:none;margin:0;padding:4px 16px 8px}
+@media (min-width:520px){.grid{grid-template-columns:repeat(3,1fr)}}
+@media (min-width:760px){.grid{grid-template-columns:repeat(4,1fr)}}
+.gc{border:0;padding:0;background:none;cursor:pointer;width:100%;display:block;text-align:left;color:var(--text)}
+.gc img,.gc .ph{width:100%;height:auto;aspect-ratio:488/680;border-radius:4.75%/3.5%;display:block;object-fit:cover;background:var(--surface-2)}
+.gc.missing img{opacity:.55}
+.gc .ph{display:flex;align-items:center;justify-content:center;padding:10px;text-align:center;font-weight:700;font-size:.875rem;color:#1b1b1b}
+.gc .cap{display:flex;justify-content:space-between;align-items:center;gap:6px;margin-top:6px;font-size:.8125rem;font-weight:700}
+.gc .cap .m{color:var(--miss)} .gc .cap .k{color:var(--ok)}
+
+/* formulários e blocos */
+.form{padding:16px;display:grid;gap:16px}
+label{display:block;font-weight:700;margin-bottom:6px}
+input[type=text],select.field,textarea{width:100%;min-height:var(--tap);padding:10px 12px;border-radius:var(--r-sm);border:1px solid var(--line-strong);background:var(--surface)}
+textarea{min-height:240px;font-family:var(--mono);font-size:.9375rem;line-height:1.45}
+.err{color:var(--miss);font-weight:700}
+.card{background:var(--surface);border-radius:var(--r)}
+.pad{padding:16px}
+.stack>*+*{margin-top:12px}
+.empty{text-align:center;padding:40px 20px;margin:16px}
+.foot{padding:16px;font-size:.8125rem;color:var(--muted)}
+
+/* navegação */
+nav.tabs{position:fixed;left:0;right:0;bottom:0;background:var(--bg);border-top:1px solid var(--line);
+  display:grid;grid-template-columns:repeat(3,1fr);padding-bottom:env(safe-area-inset-bottom);z-index:12}
+nav.tabs a{min-height:60px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  color:var(--muted);text-decoration:none;font-size:.75rem;font-weight:750;position:relative}
+nav.tabs a[aria-current=page]{color:var(--accent)}
+nav.tabs a .icon{width:22px;height:22px}
+nav.tabs a .pip{position:absolute;top:10px;left:calc(50% + 8px);width:9px;height:9px;border-radius:50%;background:var(--miss);border:2px solid var(--bg)}
+
+/* pop-up da carta */
+dialog{border:0;padding:0;border-radius:16px;background:var(--surface);color:var(--text);width:min(94vw,420px);max-height:92vh;box-shadow:0 24px 64px rgba(0,0,0,.5)}
+dialog::backdrop{background:rgba(5,6,8,.75)}
+dialog[open]{animation:pop .16s ease-out}
+@keyframes pop{from{transform:translateY(8px) scale(.98);opacity:0}to{transform:none;opacity:1}}
+.dlg{max-height:92vh;overflow:auto}
+.dlg-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:14px 4px 0 16px}
+.dlg-top h2{margin:6px 0 2px;font-size:1.1875rem;line-height:1.2}
+.dlg-top .sub{display:flex;gap:8px;align-items:center;flex-wrap:wrap;color:var(--muted);font-size:.875rem}
+.cardimg{width:100%;height:auto;max-width:280px;aspect-ratio:488/680;display:block;margin:12px auto;border-radius:4.75%/3.5%;background:var(--surface-2);object-fit:cover}
+.dlg-sec{padding:12px 16px;border-top:1px solid var(--line)}
+.dlg-sec h3{font-size:.8125rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 8px;font-weight:800}
+.big{font-size:1.625rem;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.links{display:grid;gap:8px;margin-top:12px}
+.links2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ownrow{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;padding:4px 0}
+.stepper{display:flex;align-items:center;border:1px solid var(--line-strong);border-radius:var(--r-sm);overflow:hidden}
+.stepper button{min-width:44px;min-height:44px;border:0;background:transparent;font-weight:800;font-size:1.125rem;cursor:pointer}
+.stepper button:active{background:var(--surface-2)}
+.stepper button[disabled]{opacity:.4}
+.stepper output{min-width:52px;text-align:center;font-weight:800;font-variant-numeric:tabular-nums;border-left:1px solid var(--line-strong);border-right:1px solid var(--line-strong);line-height:44px}
+.rulings ul{padding-left:20px;margin:0;font-size:.9375rem}
+.rulings li{margin-bottom:8px}
+
+#toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--text);color:var(--bg);
+  padding:12px 16px;border-radius:10px;font-weight:700;opacity:0;pointer-events:none;transition:opacity .2s;max-width:min(90vw,420px);z-index:40;text-align:center}
+#toast.show{opacity:1}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}.btn:active,.dk:active{transform:none}}
+
+/* ===== v0.8: medidas e ritmo copiados do Moxfield (mobile) ===== */
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#222222; --surface:#2b2b2b; --surface-2:#333333; --line:#333333; --line-strong:#8c8c8c;
+    --text:#dddddd; --muted:#bdbdbd; --hover:#2a2a2a; }
+}
+:root{ --row:44px; --side:12px; }
+body.compact{ --row:33px; }
+.appbar .in{min-height:55px;padding-left:12px}
+.brand{font-size:1.125rem;letter-spacing:.12em}
+/* cabeçalho de página, igual ao topo do deck */
+.head.compact{padding:16px var(--side) 6px}
+.eyebrow{color:var(--accent);font-size:.9375rem;letter-spacing:.02em;text-transform:none;font-weight:700}
+.page-title{font-size:2.25rem;line-height:1.1;font-weight:800;letter-spacing:-.02em;margin:2px 0 8px;color:var(--text)}
+.stats{display:flex;align-items:center;gap:18px;margin-top:10px;color:var(--text);font-size:.875rem}
+.stats span{display:inline-flex;align-items:center;gap:6px}
+.stats .icon{width:16px;height:16px}
+.updated{margin-top:12px;font-size:.875rem;color:var(--muted)}
+.banner .updated{color:#e6e6e6}
+.banner h1{font-size:2.5rem;line-height:1.1}
+.banner{min-height:240px}
+/* barra de ações (ícones) + "Opções de exibição" em linha própria */
+.tools{display:block;padding:8px var(--side) 0;border-bottom:0}
+.tools .row1{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:8px}
+.tools .ic{gap:10px}
+.tools .ib{min-width:var(--tap);min-height:var(--tap);color:var(--muted)}
+.tools .row2{display:flex;justify-content:flex-end;padding:4px 0}
+.tools .link{font-weight:500}
+/* seções */
+.sec{padding:14px 0 0}
+.sec-h{padding:0 var(--side);border-bottom:2px solid var(--line);min-height:34px}
+.sec-t{font-size:1rem;gap:6px}
+.sec-t .ti{width:18px;height:18px;color:var(--muted)}
+.sec-t .chev{width:14px;height:14px;color:var(--text)}
+.sec-t[aria-expanded=false] .chev{transform:rotate(-90deg)}
+.sec-h .sum{font-size:.875rem}
+/* linhas */
+.r{grid-template-columns:20px minmax(0,1fr) auto auto;column-gap:12px;min-height:var(--row);padding:0 var(--side);border-bottom:1px solid var(--line)}
+.r:nth-child(even){background:transparent}
+.r .q{font-weight:400;text-align:left}
+.r .q.miss{font-weight:700}
+.r .nm{color:var(--text);font-weight:400;padding:6px 0;min-height:var(--row)}
+.r .nm .d{font-size:.75rem;margin-top:0}
+.mana{gap:2px}
+.mana img{width:16px;height:16px}
+.own{margin-right:-8px}
+.own i{height:22px;min-width:30px;font-size:.6875rem;border-width:1.5px}
+.own.done i{min-width:22px;width:22px;padding:0;border-radius:50%}
+.r .pr{font-size:.875rem;font-weight:500;min-width:64px}
+body.compact .r .nm .d{display:none}
+body.compact .r .own,body.compact .r .nm{min-height:var(--row);padding-top:0;padding-bottom:0}
+.foot{padding:16px var(--side)}
+.chipline{padding:6px var(--side) 0}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Pular para o conteúdo</a>
+<header class="appbar"><div class="in">
+  <a class="brand" href="#/falta"><img src="icons/icon-192.png" alt="" width="28" height="28">Falta Uma</a>
+  <span class="spacer"></span>
+  <span id="barAction"></span>
+</div></header>
+<main id="main" class="wrap" tabindex="-1"></main>
+<div id="fab" class="fab" role="toolbar" aria-label="Ações da lista"></div>
+
+<nav class="tabs" aria-label="Seções">
+  <a href="#/falta" data-tab="falta">
+    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6h15l-1.5 9h-12z"/><path d="M6 6 5 3H2"/><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/></svg>
+    <span>O que falta</span></a>
+  <a href="#/decks" data-tab="decks">
+    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="12" height="16" rx="2"/><path d="M4 7v12a2 2 0 0 0 2 2h9"/></svg>
+    <span>Decks</span></a>
+  <a href="#/mais" data-tab="mais">
+    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+    <span>Mais</span></a>
+</nav>
+
+<dialog id="cardDialog" aria-labelledby="dlgTitle"><div class="dlg" id="dlgBody"></div></dialog>
+<dialog id="sheet" class="sheet" aria-labelledby="sheetTitle"><div class="sheet-in" id="sheetBody"></div></dialog>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script src="logic.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
