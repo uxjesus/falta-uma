@@ -637,8 +637,13 @@
       return '<div class="card empty stack"><h1 style="font-size:1.5rem">Decks</h1><p class="muted">Nenhum deck ainda.</p>' +
         '<a class="btn primary full" href="#/novo">Adicionar deck</a><button class="btn full" data-act="example">Ver com decks de exemplo</button></div>';
     }
-    var html = '<header class="head"><h1>Decks</h1><p class="metaline">' + state.decks.length + (state.decks.length === 1 ? ' deck' : ' decks') + '</p></header><ul class="decklist">';
-    state.decks.forEach(function (d) {
+    var html = '<header class="head"><h1>Decks</h1><p class="metaline">' + state.decks.length + (state.decks.length === 1 ? ' deck' : ' decks') + '</p></header>';
+    var fl = formats();
+    fl.forEach(function (fm) {
+    var inF = state.decks.filter(function (d) { return fmtOf(d) === fm; });
+    if (fl.length > 1) html += '<h2 class="sec-h fmt-h">' + esc(fm) + ' <span class="c">(' + inF.length + ')</span></h2>';
+    html += '<ul class="decklist">';
+    inF.forEach(function (d) {
       var p = FU.deckProgress(d);
       var miss = p.need - p.have;
       var f = featured(d);
@@ -650,7 +655,9 @@
         '<div class="ln"><span>' + (d.cards.length ? p.pct + '% pronto · ' + (miss ? 'faltam ' + miss : 'completo') : 'Sem cartas · ' + ((d.sources || []).length || 0) + ' fontes na pesquisa') + '</span><span>' + (mv ? '≈ ' + brl0.format(mv) : '') + '</span></div>' +
         '<div class="bar" aria-hidden="true"><span style="width:' + p.pct + '%"></span></div></div></a></li>';
     });
-    return html + '</ul>';
+    html += '</ul>';
+    });
+    return html;
   }
 
   function ownBtn(c, idx) {
@@ -688,14 +695,14 @@
     chev: '<svg class="chev" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>'
   };
   function toolsBar(buttons, ctx, right) {
-    return '<div class="tools"><div class="row1"><div class="ic">' + buttons.join('') + '</div>' + (right || '') + '</div>' +
-      '<div class="row2"><button class="link" data-sheet="opts" data-ctx="' + esc(ctx) + '">' + ICO.sliders + 'Opções de exibição</button></div></div>';
+    return '<div class="tools"><div class="row1"><div class="ic">' + buttons.join('') + '</div><div class="rt">' +
+      '<button class="link" data-sheet="opts" data-ctx="' + esc(ctx) + '" aria-label="Opções de exibição">' + ICO.sliders + 'Exibição</button>' + (right || '') + '</div></div></div>';
   }
   function toolBtn(attrs, icon, label) {
     return '<button class="ib" ' + attrs + ' aria-label="' + esc(label) + '" title="' + esc(label) + '">' + icon + '</button>';
   }
   var TYPE_ICON = {
-    'Criaturas': '<path d="M5 20c2-6 6-9 7-16M12 4c1 7 5 10 7 16M8 20h8"/>',
+    'Criaturas': '<circle cx="5.5" cy="10" r="1.9"/><circle cx="9.5" cy="5.5" r="1.9"/><circle cx="14.5" cy="5.5" r="1.9"/><circle cx="18.5" cy="10" r="1.9"/><path d="M12 11.5c-2.6 0-5 3.3-5 5.8 0 1.8 1.4 2.7 2.8 2.7.9 0 1.5-.5 2.2-.5s1.3.5 2.2.5c1.4 0 2.8-.9 2.8-2.7 0-2.5-2.4-5.8-5-5.8z"/>',
     'Mágicas instantâneas': '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
     'Feitiços': '<path d="M12 3c2 4 6 5 6 10a6 6 0 0 1-12 0c0-3 2-4 3-6 1 2 2 2 3 1-1-2 0-3 0-5z"/>',
     'Encantamentos': '<path d="M12 3l2.5 5.5L20 9l-4 4 1 6-5-3-5 3 1-6-4-4 5.5-.5z"/>',
@@ -732,17 +739,19 @@
     if (type === 'opts') {
       html = '<h2 id="sheetTitle">Opções de exibição</h2>';
       if (ctx === 'falta') {
-        if (state.decks.length > 1) html += segRow('Deck', 'deck', [['all', 'Todos']].concat(state.decks.map(function (d) { return [d.id, d.name]; })), ui.deck);
-        html += segRow('Ver como', 'fview', [['list', 'Lista'], ['grid', 'Imagens']], ui.fview === 'grid' ? 'grid' : 'list');
+        var fl = formats();
+        if (fl.length > 1) html += segRow('Formato', 'fmt', [['all', 'Todos']].concat(fl.map(function (f) { return [f, f]; })), ui.fmt && ui.fmt !== 'all' ? ui.fmt : 'all');
+        var inF = state.decks.filter(function (d) { return !ui.fmt || ui.fmt === 'all' || fmtOf(d) === ui.fmt; });
+        if (inF.length > 1) html += segRow('Deck', 'deck', [['all', ui.fmt && ui.fmt !== 'all' ? 'Todos de ' + ui.fmt : 'Todos']].concat(inF.map(function (d) { return [d.id, d.name]; })), ui.deck || 'all');
+        html += segRow('Ver como', 'fview', [['grid', 'Imagens'], ['list', 'Lista']], ui.fview === 'list' ? 'list' : 'grid');
       } else {
-        var v = ui.view[ctx] === 'grid' ? 'grid' : 'list';
-        html += segRow('Ver como', 'dview', [['list', 'Lista'], ['grid', 'Imagens']], v);
+        var v = ui.view[ctx] === 'list' ? 'list' : 'grid';
+        html += segRow('Ver como', 'dview', [['grid', 'Imagens'], ['list', 'Lista']], v);
         html += segRow('Mostrar', 'onlyMiss', [['no', 'Todas'], ['yes', 'Só o que falta']], ui.onlyMiss ? 'yes' : 'no');
       }
       html += segRow('Ordenar por', 'sort', [['name', 'Nome'], ['price', 'Preço'], ['cmc', 'Custo']], ui.sort);
-      html += segRow('Altura das linhas', 'density', [['comfy', 'Confortável (toque AAA)'], ['compact', 'Compacta (igual ao Moxfield)']], ui.density === 'compact' ? 'compact' : 'comfy');
     } else if (type === 'export') {
-      var miss = ctx === 'falta' ? FU.aggregateMissing(ui.deck === 'all' ? state.decks : [deckById(ui.deck)], canonical) : FU.aggregateMissing([deckById(ctx)], canonical);
+      var miss = ctx === 'falta' ? FU.aggregateMissing(scopeDecks(), canonical) : FU.aggregateMissing([deckById(ctx)], canonical);
       html = '<h2 id="sheetTitle">Exportar</h2><ul class="menu">' +
         '<li><button data-exp="liga"' + (miss.length ? '' : ' disabled') + '>' + svg('<path d="M6 6h15l-1.5 9h-12z"/><path d="M6 6 5 3H2"/><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/>') + '<span>Copiar o que falta para a Liga Magic<small>Formato do "Comprar por lista"</small></span></button></li>' +
         '<li><button data-exp="share"' + (miss.length ? '' : ' disabled') + '>' + ICON.share + '<span>Compartilhar o que falta<small>WhatsApp e outros apps</small></span></button></li>' +
@@ -763,7 +772,8 @@
     var ctx = sheetCtx.ctx;
     if (t.hasAttribute('data-set')) {
       var k = t.getAttribute('data-set'), v = t.getAttribute('data-val');
-      if (k === 'deck') state.ui.deck = v;
+      if (k === 'fmt') { state.ui.fmt = v; state.ui.deck = 'all'; }
+      else if (k === 'deck') state.ui.deck = v;
       else if (k === 'fview') state.ui.fview = v;
       else if (k === 'dview') state.ui.view[ctx] = v;
       else if (k === 'onlyMiss') state.ui.onlyMiss = v === 'yes';
@@ -786,7 +796,7 @@
       toast((or.changed ? 'Marquei ' + or.changed + (or.changed === 1 ? ' carta.' : ' cartas.') : 'Nada novo para marcar.') + (or.notFound.length ? ' ' + or.notFound.length + (or.notFound.length === 1 ? ' não está' : ' não estão') + ' neste deck.' : ''));
       return;
     }
-    var scope = ctx === 'falta' ? (state.ui.deck === 'all' ? state.decks : [deckById(state.ui.deck)]) : [deckById(ctx)];
+    var scope = ctx === 'falta' ? (scopeDecks()) : [deckById(ctx)];
     var txt = FU.toLigaMagic(FU.aggregateMissing(scope, canonical));
     var x = t.getAttribute('data-exp');
     if (x === 'liga') { copyText(txt, 'Copiado. Cole no "Comprar por lista" da Liga Magic.'); sheet.close(); }
@@ -794,9 +804,33 @@
     else if (x === 'full') { copyText(FU.toText(deckById(ctx).cards), 'Lista completa copiada.'); sheet.close(); }
   });
 
+  /* Decks que entram na conta: filtra por formato e, se escolhido, por um deck só. */
+  function fmtOf(d) { return d.format || 'Sem formato'; }
+  function formats() {
+    var seen = [];
+    state.decks.forEach(function (d) { if (seen.indexOf(fmtOf(d)) === -1) seen.push(fmtOf(d)); });
+    var order = ['Premodern', 'Commander', 'Pauper', 'Legacy', 'Modern', 'Outro', 'Sem formato'];
+    return seen.sort(function (a, b) { var ia = order.indexOf(a), ib = order.indexOf(b); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b); });
+  }
+  function scopeDecks() {
+    var ui = state.ui;
+    if (ui.fmt && ui.fmt !== 'all' && formats().indexOf(ui.fmt) === -1) ui.fmt = 'all';
+    var ds = state.decks.filter(function (d) { return !ui.fmt || ui.fmt === 'all' || fmtOf(d) === ui.fmt; });
+    if (ui.deck && ui.deck !== 'all') {
+      var one = deckById(ui.deck);
+      if (one && ds.indexOf(one) !== -1) return [one];
+      ui.deck = 'all';
+    }
+    return ds;
+  }
+  function scopeLabel() {
+    var ui = state.ui;
+    if (ui.deck && ui.deck !== 'all' && deckById(ui.deck)) return deckById(ui.deck).name;
+    if (ui.fmt && ui.fmt !== 'all') return ui.fmt;
+    return '';
+  }
   function heroArt() {
-    var one = state.ui.deck !== 'all' && deckById(state.ui.deck);
-    var list = one ? [one] : state.decks;
+    var list = scopeDecks();
     for (var i = 0; i < list.length; i++) { var f = featured(list[i]); if (f) return artOf(f); }
     return null;
   }
@@ -809,7 +843,7 @@
   function viewFalta() {
     var ui = state.ui;
     if (ui.deck !== 'all' && !deckById(ui.deck)) ui.deck = 'all';
-    var items = FU.aggregateMissing(ui.deck === 'all' ? state.decks : [deckById(ui.deck)], canonical);
+    var items = FU.aggregateMissing(scopeDecks(), canonical);
     var totalCards = 0, totalBrl = 0;
     items.forEach(function (i) {
       totalCards += i.total;
@@ -824,10 +858,9 @@
         '<a class="btn primary full" href="#/novo">' + ICON.plus + 'Adicionar deck</a>' +
         '<button class="btn full" data-act="example">Ver com decks de exemplo</button></div>';
     }
-    var scopeName = ui.deck === 'all' ? 'Todos os decks' : deckById(ui.deck).name;
-    var html = heroHtml() + '<header class="head compact"><p class="eyebrow">' + esc(scopeName) + '</p>' +
-      '<h1 class="page-title">O que me falta</h1>' +
-      '<p class="statline"><span class="badge">' + totalCards + (totalCards === 1 ? ' carta' : ' cartas') + '</span>' + (totalBrl ? '<span class="badge">≈ ' + brl0.format(totalBrl) + '</span>' : '') +
+    var scopeName = scopeLabel();
+    var html = heroHtml() + '<header class="head compact"><h1 class="visually-hidden">O que me falta' + (scopeName ? ': ' + esc(scopeName) : '') + '</h1>' +
+      '<p class="statline">' + (scopeName ? '<span class="badge scope">' + esc(scopeName) + '</span>' : '') + '<span class="badge">' + totalCards + (totalCards === 1 ? ' carta' : ' cartas') + '</span>' + (totalBrl ? '<span class="badge">≈ ' + brl0.format(totalBrl) + '</span>' : '') +
       '<span class="updated">' + priceStatus() + '</span></p></header>' +
       toolsBar([
         toolBtn('data-buy="falta"' + (items.length ? '' : ' disabled'), svg('<path d="M6 6h15l-1.5 9h-12z"/><path d="M6 6 5 3H2"/><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/>'), 'Comprar: copiar o que falta para a Liga Magic'),
@@ -836,7 +869,7 @@
       ], 'falta');
 
     if (!items.length) return html + '<div class="card empty"><p><strong>Nada faltando aqui.</strong></p></div>';
-    var grid = ui.fview === 'grid';
+    var grid = ui.fview !== 'list';
     groupByType(items, function (i) { return i.name; }).forEach(function (g) {
       sortItems(g.items, function (i) { return i.name; }, function (i) { return i.total; });
       var n = 0, v = 0;
@@ -876,7 +909,7 @@
     var miss = p.need - p.have;
     var f = featured(d);
     var tab = state.ui.view[d.id + ':tab'] === 'research' || state.ui.view[d.id] === 'research' ? 'research' : 'deck';
-    var view = state.ui.view[d.id] === 'grid' ? 'grid' : 'list';
+    var view = state.ui.view[d.id] === 'list' ? 'list' : 'grid';
     var onlyMiss = !!state.ui.onlyMiss;
     var basics = d.cards.filter(function (c) { return FU.isBasic(c.name); });
     var total = d.cards.filter(function (c) { return c.board !== 'side'; }).reduce(function (s, c) { return s + c.qty; }, 0);
@@ -1314,7 +1347,7 @@
     if (!t || !(main.contains(t) || barAction.contains(t) || fab.contains(t))) return;
     if (t.hasAttribute('data-buy')) {
       var bc = t.getAttribute('data-buy');
-      var bscope = bc === 'falta' ? (state.ui.deck === 'all' ? state.decks : [deckById(state.ui.deck)]) : [deckById(bc)];
+      var bscope = bc === 'falta' ? (scopeDecks()) : [deckById(bc)];
       copyText(FU.toLigaMagic(FU.aggregateMissing(bscope, canonical)), 'Copiado. Cole no "Comprar por lista" da Liga Magic.');
       return;
     }
@@ -1390,7 +1423,7 @@
       return;
     }
     var act = t.getAttribute('data-act');
-    var scope = state.ui.deck === 'all' ? state.decks : [deckById(state.ui.deck)];
+    var scope = scopeDecks();
     if (act === 'copyLiga') {
       copyText(FU.toLigaMagic(FU.aggregateMissing(scope, canonical)), 'Lista copiada. Cole no "Comprar por lista" da Liga Magic.');
     } else if (act === 'shareMissing') {
@@ -1522,7 +1555,7 @@
   }
 
   /* ---------- início ---------- */
-  document.body.classList.toggle('compact', state.ui.density === 'compact');
+  document.body.classList.remove('compact'); // altura AAA sempre
   onRoute();
   var needsUpgrade = db.v !== DATA_VERSION && Object.keys(db.cards).length;
   if (navigator.onLine && state.decks.length && (needsUpgrade || !db.updatedAt || Date.now() - db.updatedAt > STALE_MS)) {
