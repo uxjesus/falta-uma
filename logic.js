@@ -300,7 +300,49 @@
     }).filter(Boolean).join('\n');
   }
 
+  /* Um campo só na Pesquisa: separa link, nome (texto solto) e lista de cartas. */
+  var HEAD_RE = /^(deck|main|maindeck|main deck|mainboard|sideboard|side|sb|commander|comandante|maybeboard|maybe|considering)\s*:?$/i;
+  function splitSource(text) {
+    var url = '', label = '', list = [];
+    String(text || '').replace(/\r/g, '').split('\n').forEach(function (raw) {
+      var l = raw.trim();
+      var m = l.match(/https?:\/\/\S+/i);
+      if (m && !url) { url = m[0].replace(/[).,]+$/, ''); l = l.replace(m[0], '').trim(); if (!l) return; }
+      if (!l) { list.push(''); return; }
+      if (/^(sb:\s*)?\d{1,2}\s*[xX]?\s+\S/i.test(l) || HEAD_RE.test(l)) { list.push(l); return; }
+      if (!label) label = l.slice(0, 80);
+    });
+    return { url: url, label: label, list: list.join('\n') };
+  }
+
+  /* Marca como "tenho" as cartas de uma lista colada. Sem número = todas as cópias. Só aumenta. */
+  function markOwned(cards, text, canonical) {
+    var lines = String(text || '').replace(/\r/g, '').split('\n').map(function (l) {
+      var t = l.trim();
+      if (!t || /^\d/.test(t) || /^sb:/i.test(t) || HEAD_RE.test(t)) return t;
+      return '99 ' + t;
+    });
+    var parsed = parseList(lines.join('\n')).cards;
+    var want = {}, names = {};
+    parsed.forEach(function (c) {
+      var nm = canonical ? canonical(c.name) : c.name;
+      var k = key(nm);
+      want[k] = (want[k] || 0) + c.qty; names[k] = nm;
+    });
+    var changed = 0, hit = {};
+    cards.slice().sort(function (a, b) { return (a.board === 'side') - (b.board === 'side'); }).forEach(function (c) {
+      var k = key(canonical ? canonical(c.name) : c.name);
+      if (!want[k]) return;
+      hit[k] = 1;
+      var give = Math.min(c.qty, want[k]);
+      if (give > (c.owned || 0)) { c.owned = give; changed++; }
+      want[k] -= give;
+    });
+    return { changed: changed, notFound: Object.keys(names).filter(function (k) { return !hit[k]; }).map(function (k) { return names[k]; }) };
+  }
+
   var api = {
+    splitSource: splitSource, markOwned: markOwned,
     consensus: consensus, buildIndex: buildIndex, matchName: matchName, resolveName: resolveName, cleanOcr: cleanOcr, norm: norm,
     typeGroup: typeGroup, GROUP_ORDER: GROUP_ORDER, parseMana: parseMana, toText: toText, mergeOwned: mergeOwned,
     parseList: parseList, aggregateMissing: aggregateMissing, deckProgress: deckProgress,
