@@ -324,6 +324,49 @@
     if (el) el.focus({ preventScroll: true });
   });
 
+  /* Cartas marcadas como "tenho" que saíram dos decks: ficam guardadas (ajudam na troca com amigos). */
+  function spareMap() { state.spare = state.spare || {}; return state.spare; }
+  function putSpare(name, n) {
+    if (!(n > 0)) return;
+    var s = spareMap(), nm = canonical(name), k = FU.key(nm);
+    s[k] = { name: nm, qty: Math.min(999, ((s[k] && s[k].qty) || 0) + n) };
+  }
+  function takeSpare(name, want) {
+    var s = spareMap(), k = FU.key(canonical(name));
+    if (!s[k] || !(want > 0)) return 0;
+    var got = Math.min(want, s[k].qty);
+    s[k].qty -= got;
+    if (s[k].qty <= 0) delete s[k];
+    return got;
+  }
+  function spareQty(name) { var s = spareMap()[FU.key(canonical(name))]; return s ? s.qty : 0; }
+  function decksWithSpare() {
+    var s = spareMap();
+    var cards = Object.keys(s).map(function (k) { return { name: s[k].name, qty: s[k].qty, owned: s[k].qty, board: 'main' }; });
+    return cards.length ? state.decks.concat([{ id: 'spare', name: 'Guardadas', cards: cards }]) : state.decks;
+  }
+  function removeCard(d, i) {
+    var c = d.cards[i];
+    if (!c) return;
+    putSpare(c.name, c.owned || 0);
+    d.cards.splice(i, 1);
+    if (d.cover && FU.key(d.cover) === FU.key(canonical(c.name)) && !d.cards.some(function (x) { return FU.key(canonical(x.name)) === FU.key(d.cover); })) d.cover = null;
+  }
+  function setQty(c, q) {
+    q = Math.max(1, Math.min(99, q));
+    if (q < (c.owned || 0)) { putSpare(c.name, c.owned - q); c.owned = q; }
+    if (q > c.qty && (c.owned || 0) < q) c.owned = (c.owned || 0) + takeSpare(c.name, q - (c.owned || 0));
+    c.qty = q;
+  }
+  function moveBoard(d, i) {
+    var c = d.cards[i];
+    if (!c) return;
+    var to = c.board === 'side' ? 'main' : 'side';
+    var ex = d.cards.filter(function (x) { return x !== c && x.board === to && FU.key(canonical(x.name)) === FU.key(canonical(c.name)); })[0];
+    if (ex) { ex.qty = Math.min(99, ex.qty + c.qty); ex.owned = Math.min(ex.qty, (ex.owned || 0) + (c.owned || 0)); d.cards.splice(i, 1); }
+    else c.board = to;
+  }
+
   function ownedLines(nm) {
     var out = [];
     state.decks.forEach(function (d) {
@@ -336,15 +379,39 @@
   function ownHtml(nm) {
     var lines = ownedLines(nm);
     if (!lines.length) return '';
-    return '<div class="dlg-sec"><h3>Nos seus decks · quantas você tem</h3>' + lines.map(function (l) {
-      var bl = l.c.board === 'side' ? ' · side' : (l.c.board === 'commander' ? ' · comandante' : '');
-      return '<div class="ownrow"><div><a href="#/deck/' + esc(l.d.id) + '" data-close>' + esc(l.d.name) + '</a><div class="xs muted">' + l.c.qty + ' no deck' + bl +
-        (FU.missingOf(l.c) ? ' · <strong style="color:var(--miss)">faltam ' + FU.missingOf(l.c) + '</strong>' : ' · completo') + '</div></div>' +
-        '<div class="stepper" role="group" aria-label="Quantas eu tenho em ' + esc(l.d.name) + '">' +
-        '<button data-mown="-1" data-d="' + esc(l.d.id) + '" data-i="' + l.i + '" aria-label="Tenho uma a menos"' + (l.c.owned <= 0 ? ' disabled' : '') + '>−</button>' +
+    return '<div class="dlg-sec"><h3>Nos seus decks e listas</h3>' + lines.map(function (l) {
+      var bl = l.c.board === 'side' ? 'Sideboard' : (l.c.board === 'commander' ? 'Comandante' : 'Principal');
+      var at = ' data-d="' + esc(l.d.id) + '" data-i="' + l.i + '"';
+      var who = esc(l.d.name) + (l.c.board === 'side' ? ' (sideboard)' : '');
+      return '<div class="ownrow2"><p class="hd"><a href="#/deck/' + esc(l.d.id) + '" data-close>' + esc(l.d.name) + '</a> <span class="xs muted">· ' + bl +
+        (FU.missingOf(l.c) ? ' · <strong style="color:var(--miss)">faltam ' + FU.missingOf(l.c) + '</strong>' : ' · completo') + '</span></p>' +
+        '<div class="ctl"><span id="lq' + l.i + esc(l.d.id) + '">No deck</span><div class="stepper" role="group" aria-labelledby="lq' + l.i + esc(l.d.id) + '">' +
+        '<button data-mqty="-1"' + at + ' aria-label="Uma a menos no deck ' + who + '"' + (l.c.qty <= 1 ? ' disabled' : '') + '>−</button>' +
+        '<output aria-live="polite">' + l.c.qty + '</output>' +
+        '<button data-mqty="1"' + at + ' aria-label="Uma a mais no deck ' + who + '"' + (l.c.qty >= 99 ? ' disabled' : '') + '>+</button></div></div>' +
+        '<div class="ctl"><span id="lo' + l.i + esc(l.d.id) + '">Tenho</span><div class="stepper" role="group" aria-labelledby="lo' + l.i + esc(l.d.id) + '">' +
+        '<button data-mown="-1"' + at + ' aria-label="Tenho uma a menos em ' + who + '"' + (l.c.owned <= 0 ? ' disabled' : '') + '>−</button>' +
         '<output aria-live="polite">' + l.c.owned + '/' + l.c.qty + '</output>' +
-        '<button data-mown="1" data-d="' + esc(l.d.id) + '" data-i="' + l.i + '" aria-label="Tenho uma a mais"' + (l.c.owned >= l.c.qty ? ' disabled' : '') + '>+</button></div></div>';
+        '<button data-mown="1"' + at + ' aria-label="Tenho uma a mais em ' + who + '"' + (l.c.owned >= l.c.qty ? ' disabled' : '') + '>+</button></div></div>' +
+        '<div class="act">' + (l.c.board !== 'commander' ? '<button class="link" data-mmove' + at + '>' + (l.c.board === 'side' ? 'Mover para o principal' : 'Mover para o sideboard') + '</button>' : '<span></span>') +
+        '<button class="link danger" data-mdel' + at + '>Tirar ' + (l.d.format === 'Lista' ? 'da lista' : 'do deck') + '</button></div></div>';
     }).join('') + '</div>';
+  }
+  function spareHtml(nm) {
+    var n = spareQty(nm);
+    if (!n) return '';
+    return '<div class="dlg-sec"><h3>Guardadas</h3><p class="small">Você marcou que tem <strong>' + n + '</strong> fora dos decks. Elas contam na troca com amigos e voltam sozinhas se a carta entrar num deck.</p>' +
+      '<button class="link" data-spareclear>Não tenho mais</button></div>';
+  }
+  function addToHtml(nm) {
+    if (!state.decks.length) return '';
+    var r = route(), cur = r.name === 'deck' ? r.id : null;
+    var lists = state.decks.filter(function (d) { return d.format === 'Lista'; });
+    var def = cur || (lists[0] && lists[0].id) || state.decks[0].id;
+    var opts = state.decks.slice().sort(function (a, b) { return (a.format === 'Lista') - (b.format === 'Lista'); });
+    return '<div class="dlg-sec"><h3><label for="addTo">Adicionar a um deck ou lista</label></h3><div class="addto">' +
+      '<select id="addTo" class="field">' + opts.map(function (d) { return '<option value="' + esc(d.id) + '"' + (d.id === def ? ' selected' : '') + '>' + esc(d.name) + (d.format === 'Lista' ? ' (lista)' : '') + '</option>'; }).join('') + '</select>' +
+      '<button class="btn" data-addto>' + ICON.plus + 'Adicionar</button></div></div>';
   }
 
   function openCard(name, trigger) {
@@ -385,7 +452,7 @@
       (info && info.scryfall ? '<a class="btn" href="' + esc(info.scryfall) + '" target="_blank" rel="noopener">Regras</a>' : '') +
       (info && info.gatherer ? '<a class="btn" href="' + esc(info.gatherer) + '" target="_blank" rel="noopener">Gatherer</a>' : '') +
       '</div></div>' + noteForm + '</div>' +
-      ownHtml(nm) + coverHtml(nm) +
+      ownHtml(nm) + addToHtml(nm) + spareHtml(nm) + coverHtml(nm) +
       '<div id="rulings" class="rulings"></div>';
     document.getElementById('dlgClose').addEventListener('click', function () { dlg.close(); });
     dlgBody.querySelectorAll('[data-close]').forEach(function (a) { a.addEventListener('click', function () { lastFocus = null; dlg.close(); }); });
@@ -434,6 +501,46 @@
     var ed = e.target.closest('[data-ed]');
     if (ed) { stepPrint(+ed.getAttribute('data-ed')); return; }
     if (e.target.closest('[data-edreset]')) { resetPrint(); return; }
+    if (e.target.closest('[data-spareclear]')) {
+      delete spareMap()[FU.key(canonical(openName))];
+      persist(true); toast('Tirei das guardadas.'); openCard(openName); return;
+    }
+    if (e.target.closest('[data-addto]')) {
+      var ad = deckById(document.getElementById('addTo').value);
+      if (!ad) return;
+      var anm = canonical(openName);
+      var already = ad.cards.some(function (c) { return c.board === 'main' && FU.key(canonical(c.name)) === FU.key(anm); });
+      if (already) { toast('Já está em ' + ad.name + '. Ajuste a quantidade acima.'); return; }
+      addToDeck(ad, anm, 1, 'main');
+      persist(true); toast('Adicionada a ' + ad.name + '.');
+      openCard(openName);
+      var nb = dlgBody.querySelector('[data-mqty="1"][data-d="' + ad.id + '"]');
+      if (nb) nb.focus();
+      return;
+    }
+    var mt = e.target.closest('[data-mqty],[data-mmove],[data-mdel]');
+    if (mt) {
+      var md = deckById(mt.getAttribute('data-d')), mi = +mt.getAttribute('data-i');
+      var mc = md && md.cards[mi];
+      if (!mc) return;
+      var focusSel = null;
+      if (mt.hasAttribute('data-mqty')) {
+        setQty(mc, mc.qty + (+mt.getAttribute('data-mqty')));
+        focusSel = '[data-mqty="' + mt.getAttribute('data-mqty') + '"][data-d="' + md.id + '"][data-i="' + mi + '"]';
+      } else if (mt.hasAttribute('data-mmove')) {
+        moveBoard(md, mi); toast(mc.board === 'side' ? 'Movida para o sideboard.' : 'Movida para o principal.');
+      } else {
+        var had = mc.owned || 0;
+        removeCard(md, mi);
+        toast('Tirada de ' + md.name + '.' + (had ? ' Guardei a marcação de ' + had + (had === 1 ? ' cópia.' : ' cópias.') : ''));
+        focusSel = '[data-addto]';
+      }
+      persist(true);
+      openCard(openName);
+      var mf = (focusSel && dlgBody.querySelector(focusSel + ':not([disabled])')) || dlgBody.querySelector('#dlgClose');
+      if (mf) mf.focus();
+      return;
+    }
     var t = e.target.closest('[data-mown]');
     if (!t) return;
     var d = deckById(t.getAttribute('data-d'));
@@ -637,11 +744,11 @@
       return '<div class="card empty stack"><h1 style="font-size:1.5rem">Decks</h1><p class="muted">Nenhum deck ainda.</p>' +
         '<a class="btn primary full" href="#/novo">Adicionar deck</a><button class="btn full" data-act="example">Ver com decks de exemplo</button></div>';
     }
-    var html = '<header class="head"><h1>Decks</h1><p class="metaline">' + state.decks.length + (state.decks.length === 1 ? ' deck' : ' decks') + '</p></header>';
+    var html = '<header class="head"><h1>Decks</h1><p class="metaline">' + (function () { var nl = state.decks.filter(function (x) { return x.format === 'Lista'; }).length, nd = state.decks.length - nl; return nd + (nd === 1 ? ' deck' : ' decks') + (nl ? ' · ' + nl + (nl === 1 ? ' lista' : ' listas') : ''); })() + '</p></header>';
     var fl = formats();
     fl.forEach(function (fm) {
     var inF = state.decks.filter(function (d) { return fmtOf(d) === fm; });
-    if (fl.length > 1) html += '<h2 class="sec-h fmt-h">' + esc(fm) + ' <span class="c">(' + inF.length + ')</span></h2>';
+    if (fl.length > 1) html += '<h2 class="sec-h fmt-h">' + esc(fm === 'Lista' ? 'Listas' : fm) + ' <span class="c">(' + inF.length + ')</span></h2>';
     html += '<ul class="decklist">';
     inF.forEach(function (d) {
       var p = FU.deckProgress(d);
@@ -652,12 +759,12 @@
         (f ? '<img src="' + esc(artOf(f)) + '" alt="" loading="lazy" decoding="async">' : '') +
         '<span class="badge">' + esc(d.format || 'Sem formato') + '</span>' + pipsHtml(deckColors(d)) + '</div>' +
         '<div class="body"><strong>' + esc(d.name) + '</strong>' +
-        '<div class="ln"><span>' + (d.cards.length ? p.pct + '% pronto · ' + (miss ? 'faltam ' + miss : 'completo') : 'Sem cartas · ' + ((d.sources || []).length || 0) + ' fontes na pesquisa') + '</span><span>' + (mv ? '≈ ' + brl0.format(mv) : '') + '</span></div>' +
+        '<div class="ln"><span>' + (d.cards.length ? p.pct + '% pronto · ' + (miss ? 'faltam ' + miss : 'completo') : (d.format === 'Lista' ? 'Lista vazia' : 'Sem cartas · ' + ((d.sources || []).length || 0) + ' fontes na pesquisa')) + '</span><span>' + (mv ? '≈ ' + brl0.format(mv) : '') + '</span></div>' +
         '<div class="bar" aria-hidden="true"><span style="width:' + p.pct + '%"></span></div></div></a></li>';
     });
     html += '</ul>';
     });
-    return html;
+    return html + '<div style="padding:4px 16px 16px"><a class="btn full" href="#/novo/lista">' + ICON.plus + 'Nova lista de cartas avulsas</a></div>';
   }
 
   function ownBtn(c, idx) {
@@ -809,7 +916,7 @@
   function formats() {
     var seen = [];
     state.decks.forEach(function (d) { if (seen.indexOf(fmtOf(d)) === -1) seen.push(fmtOf(d)); });
-    var order = ['Premodern', 'Commander', 'Pauper', 'Legacy', 'Modern', 'Outro', 'Sem formato'];
+    var order = ['Premodern', 'Commander', 'Pauper', 'Legacy', 'Modern', 'Outro', 'Sem formato', 'Lista'];
     return seen.sort(function (a, b) { var ia = order.indexOf(a), ib = order.indexOf(b); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b); });
   }
   function scopeDecks() {
@@ -923,7 +1030,7 @@
       '<p style="display:flex;gap:8px;align-items:center"><span class="badge">' + esc(d.format || 'Sem formato') + '</span>' + pipsHtml(deckColors(d)) + '</p>' +
       (d.cards.length ? '<p class="metaline"><span><strong>' + p.pct + '%</strong> pronto</span><span>' + total + ' cartas</span>' +
         (miss ? '<span>faltam <strong>' + miss + '</strong>' + (missV ? ' · ≈ ' + brl0.format(missV) : '') + '</span>' : '<span>completo</span>') + '</p>' +
-        '<div class="meter" aria-hidden="true"><span style="width:' + p.pct + '%"></span></div>' : '<p class="metaline"><span>Sem cartas ainda. Monte pela Pesquisa.</span></p>') +
+        '<div class="meter" aria-hidden="true"><span style="width:' + p.pct + '%"></span></div>' : '<p class="metaline"><span>' + (d.format === 'Lista' ? 'Sem cartas ainda. Busque abaixo.' : 'Sem cartas ainda. Monte pela Pesquisa.') + '</span></p>') +
       '<p class="updated">Atualizado ' + esc(ago(state.changedAt || d.createdAt) || '') + '</p></div></section>' +
       '<div class="tabsbar" role="tablist" aria-label="Seções do deck">' +
       '<button role="tab" data-dtab="deck" aria-selected="' + (tab === 'deck') + '">Deck</button>' +
@@ -931,8 +1038,9 @@
 
     if (tab === 'research') return html + viewResearch(d);
     if (!d.cards.length) {
-      return html + '<div class="card pad stack" style="margin:16px"><p><strong>Seu deck ainda não tem cartas.</strong></p><p class="muted small">Use a Pesquisa para juntar listas de referência e escolher o que entra, ou edite o deck e cole uma lista.</p>' +
-        '<button class="btn primary full" data-dtab="research">Abrir Pesquisa</button></div>';
+      if (d.format === 'Lista') return html + '<div class="card pad stack" style="margin:16px"><p><strong>Lista vazia.</strong></p><p class="muted small">Busque uma carta abaixo, ou abra qualquer carta do app e toque em "Adicionar a um deck ou lista".</p></div>' + addCardHtml(d);
+      return html + '<div class="card pad stack" style="margin:16px"><p><strong>Seu deck ainda não tem cartas.</strong></p><p class="muted small">Use a Pesquisa para juntar listas de referência e escolher o que entra, busque cartas abaixo, ou edite o deck e cole uma lista.</p>' +
+        '<button class="btn primary full" data-dtab="research">Abrir Pesquisa</button></div>' + addCardHtml(d);
     }
     html += toolsBar([
       toolBtn('data-sheet="export" data-ctx="' + esc(d.id) + '"', ICO.exp, 'Exportar'),
@@ -961,25 +1069,81 @@
       html += '<section class="sec">' + secHead(bk, 'Terrenos básicos', basics.reduce(function (s, c) { return s + c.qty; }, 0), '<span class="sum">não contam</span>') +
         (isClosed(bk) ? '' : '<ul class="rows">' + basics.map(function (c) { return '<li class="r"><span class="q">' + c.qty + '</span><span class="nm" style="cursor:default">' + esc(c.name) + (c.board === 'side' ? ' (side)' : '') + '</span><span></span><span></span></li>'; }).join('') + '</ul>') + '</section>';
     }
-    if (view === 'list') html += '<p class="foot">Toque no marcador à direita para dizer que tem todas (ou nenhuma). Para ajustar uma por uma, toque no nome da carta.</p>';
+    html += addCardHtml(d);
+    html += '<p class="foot">' + (view === 'list' ? 'Toque no marcador à direita para dizer que tem todas (ou nenhuma). ' : '') + 'Toque numa carta para mudar a quantidade, mover para o sideboard, tirar do deck ou ajustar quantas você tem.</p>';
     return html;
   }
+  function addCardHtml(d) {
+    return '<section class="sec addcard" aria-labelledby="acL"><h2 class="sec-h" id="acL">Adicionar carta</h2><div class="form" style="padding-top:8px;gap:8px">' +
+      '<label for="acIn" class="visually-hidden">Nome da carta</label>' +
+      '<input type="text" id="acIn" data-acdeck="' + esc(d.id) + '" autocomplete="off" spellcheck="false" autocapitalize="off" enterkeyhint="search" placeholder="Digite o nome (em inglês)" aria-describedby="acHelp" aria-controls="acList">' +
+      '<p class="xs muted" id="acHelp">Entra 1 cópia no principal. Depois toque na carta para ajustar.</p>' +
+      '<p class="visually-hidden" id="acLive" aria-live="polite"></p><ul class="aclist" id="acList"></ul></div></section>';
+  }
+  var acTimer = null, acSeq = 0;
+  function acLocal(q) {
+    var k = FU.norm(q), out = [], seen = {};
+    var names = Object.keys(db.cards).map(function (x) { return db.cards[x]; }).filter(function (c) { return !c.notFound; }).map(function (c) { return c.name; });
+    names.forEach(function (n) { var nk = FU.norm(n); if (!seen[nk] && nk.indexOf(k) !== -1) { seen[nk] = 1; out.push(n); } });
+    return out.sort(function (a, b) { return (FU.norm(a).indexOf(k) - FU.norm(b).indexOf(k)) || a.localeCompare(b); }).slice(0, 8);
+  }
+  function acShow(list, q) {
+    var ul = document.getElementById('acList'), live = document.getElementById('acLive');
+    if (!ul) return;
+    ul.innerHTML = list.map(function (n) { return '<li><button type="button" class="acopt" data-acadd="' + esc(n) + '">' + ICON.plus + '<span>' + esc(n) + '</span></button></li>'; }).join('');
+    if (live) live.textContent = q ? (list.length ? list.length + (list.length === 1 ? ' sugestão' : ' sugestões') : 'Nenhuma carta encontrada') : '';
+  }
+  function acSearch(q) {
+    q = q.trim();
+    var seq = ++acSeq;
+    document.getElementById('toast').classList.remove('show');
+    if (q.length < 2) { acShow([], ''); return; }
+    var local = acLocal(q);
+    acShow(local, q);
+    if (!navigator.onLine) return;
+    fetch(SCRY + '/cards/autocomplete?q=' + encodeURIComponent(q), { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (seq !== acSeq || !j || !j.data) return;
+        var seen = {}, merged = [];
+        local.concat(j.data).forEach(function (n) { var nk = FU.norm(n); if (!seen[nk]) { seen[nk] = 1; merged.push(n); } });
+        acShow(merged.slice(0, 10), q);
+      }).catch(function () {});
+  }
+  function acAdd(name) {
+    var inp = document.getElementById('acIn');
+    var d = inp && deckById(inp.getAttribute('data-acdeck'));
+    if (!d || !name) return;
+    var nm = canonical(name);
+    if (d.cards.some(function (c) { return c.board === 'main' && FU.key(canonical(c.name)) === FU.key(nm); })) {
+      toast('Já está no deck. Toque na carta para mudar a quantidade.'); return;
+    }
+    addToDeck(d, nm, 1, 'main');
+    persist(true);
+    var y = window.scrollY; render(); window.scrollTo(0, y);
+    var again = document.getElementById('acIn'); if (again) again.focus({ preventScroll: true });
+    toast('Adicionada: ' + nm + '.');
+    var i = cardInfo(nm);
+    if (!i || !i.typeLine) refreshPrices({ only: [nm], silent: true });
+  }
 
-  function viewForm(id) {
+  function viewForm(id, asList) {
     var d = id ? deckById(id) : null;
     barAction.innerHTML = ''; fab.innerHTML = '';
     if (id && !d) return '<div class="card empty"><p>Deck não encontrado.</p></div>';
-    var formats = ['Premodern', 'Commander', 'Pauper', 'Legacy', 'Modern', 'Outro'];
-    return '<header class="head"><a href="' + (d ? '#/deck/' + esc(d.id) : '#/decks') + '" class="link" style="margin-left:-4px">' + ICON.back + (d ? 'Voltar ao deck' : 'Decks') + '</a>' +
-      '<h1>' + (d ? 'Editar deck' : 'Adicionar deck') + '</h1></header>' +
+    var isList = d ? d.format === 'Lista' : !!asList;
+    var formats = [['Premodern', 'Premodern'], ['Commander', 'Commander'], ['Pauper', 'Pauper'], ['Legacy', 'Legacy'], ['Modern', 'Modern'], ['Outro', 'Outro'], ['Lista', 'Lista de cartas avulsas']];
+    var cur = d ? d.format : (isList ? 'Lista' : 'Premodern');
+    return '<header class="head"><a href="' + (d ? '#/deck/' + esc(d.id) : '#/decks') + '" class="link" style="margin-left:-4px">' + ICON.back + (d ? 'Voltar' : 'Decks') + '</a>' +
+      '<h1>' + (d ? (isList ? 'Editar lista' : 'Editar deck') : (isList ? 'Nova lista' : 'Adicionar deck')) + '</h1></header>' +
       '<form id="deckForm" class="form" novalidate data-id="' + (d ? esc(d.id) : '') + '">' +
-      '<div><label for="dn">Nome do deck</label><input type="text" id="dn" autocomplete="off" required placeholder="Ex.: UG Madness" value="' + (d ? esc(d.name) : '') + '"></div>' +
-      '<div><label for="df">Formato</label><select id="df" class="field">' + formats.map(function (f) { return '<option' + (d && d.format === f ? ' selected' : '') + '>' + f + '</option>'; }).join('') + '</select></div>' +
+      '<div><label for="dn">Nome</label><input type="text" id="dn" autocomplete="off" required placeholder="' + (isList ? 'Ex.: Avulsas, Upgrades do Commander' : 'Ex.: UG Madness') + '" value="' + (d ? esc(d.name) : '') + '"></div>' +
+      '<div><label for="df">Tipo</label><select id="df" class="field">' + formats.map(function (f) { return '<option value="' + f[0] + '"' + (cur === f[0] ? ' selected' : '') + '>' + f[1] + '</option>'; }).join('') + '</select></div>' +
       '<div><label for="dl">Lista <span class="muted">(opcional: dá para montar pela Pesquisa)</span></label><p class="small muted" id="dlh" style="margin:0 0 8px">Cole do Moxfield, Archidekt, MTG Goldfish, Arena ou WhatsApp. Uma carta por linha, ex.: 4 Counterspell. Sideboard depois de uma linha "Sideboard".' + (d ? ' O que você já marcou como "tenho" continua marcado.' : '') + '</p>' +
       '<textarea id="dl" aria-describedby="dlh" spellcheck="false" autocapitalize="off">' + (d ? esc(FU.toText(d.cards)) : '') + '</textarea></div>' +
       '<p id="formErr" class="err" role="alert"></p>' +
       '<button class="btn primary full" type="submit">' + (d ? 'Salvar alterações' : 'Salvar deck') + '</button>' +
-      (d ? '<button class="btn full" type="button" data-act="deleteDeck" data-id="' + esc(d.id) + '" style="color:var(--miss);border-color:var(--miss)">Excluir deck</button>' : '') +
+      (d ? '<button class="btn full" type="button" data-act="deleteDeck" data-id="' + esc(d.id) + '" style="color:var(--miss);border-color:var(--miss)">Excluir ' + (isList ? 'lista' : 'deck') + '</button>' : '') +
       '</form>';
   }
 
@@ -993,7 +1157,7 @@
       '<button class="btn primary full" data-act="refresh">' + ICON.refresh + 'Atualizar agora</button>' +
       '<p class="xs muted">O preço vem do Scryfall em dólar (mercado americano), convertido pelo câmbio do dia. É uma noção, não o preço da loja. Para o preço no Brasil, abra a carta e toque em "Ver preço na Liga Magic".</p></section>' +
       '<section class="card pad stack" aria-labelledby="fr"><h2 id="fr" style="font-size:1.0625rem">Lista de um amigo</h2>' +
-      '<p class="muted small">Cole a lista que ele mandou. Eu mostro quais dessas cartas você tem marcadas nos seus decks.</p>' +
+      '<p class="muted small">Cole a lista que ele mandou. Eu mostro quais dessas cartas você marcou que tem, nos decks, nas listas ou guardadas.</p>' +
       '<label for="fl" class="visually-hidden">Lista do amigo</label><textarea id="fl" spellcheck="false" autocapitalize="off" style="min-height:140px" placeholder="4 Counterspell&#10;2 Wild Mongrel"></textarea>' +
       '<button class="btn full" data-act="friend">Ver o que eu tenho</button></section><div id="friendOut" aria-live="polite"></div>' +
       '<section class="card pad stack" aria-labelledby="bk"><h2 id="bk" style="font-size:1.0625rem">Backup no seu e-mail</h2>' +
@@ -1278,7 +1442,7 @@
     var nm = canonical(name);
     var ex = d.cards.filter(function (c) { return c.board === board && FU.key(canonical(c.name)) === FU.key(nm); })[0];
     if (ex) ex.qty = Math.max(ex.qty, qty);
-    else d.cards.push({ name: nm, qty: qty, board: board === 'commander' ? 'commander' : (board === 'side' ? 'side' : 'main'), owned: 0 });
+    else d.cards.push({ name: nm, qty: qty, board: board === 'commander' ? 'commander' : (board === 'side' ? 'side' : 'main'), owned: takeSpare(nm, qty) });
   }
 
   /* ---------- roteamento ---------- */
@@ -1302,7 +1466,7 @@
     document.title = (d ? d.name : (titles[r.name] || 'O que me falta')) + ' · Playset';
     if (r.name === 'decks') main.innerHTML = viewDecks();
     else if (r.name === 'deck') main.innerHTML = viewDeck(r.id);
-    else if (r.name === 'novo') main.innerHTML = viewForm(null);
+    else if (r.name === 'novo') main.innerHTML = viewForm(null, r.id === 'lista');
     else if (r.name === 'editar') main.innerHTML = viewForm(r.id);
     else if (r.name === 'mais') main.innerHTML = viewMais();
     else if (r.name === 'fonte') main.innerHTML = viewFonte(r.id);
@@ -1329,6 +1493,7 @@
   function keepFocus(sel) { var el = main.querySelector(sel); if (el) el.focus({ preventScroll: true }); }
 
   main.addEventListener('input', function (e) {
+    if (e.target.id === 'acIn') { clearTimeout(acTimer); var v = e.target.value; acTimer = setTimeout(function () { acSearch(v); }, 250); return; }
     if (e.target.id !== 'st' || route().name !== 'fonte') return;
     var h = document.getElementById('srcHint');
     if (h) h.innerHTML = srcHint(e.target.value);
@@ -1341,8 +1506,17 @@
     state.ui.deck = e.target.value; persist(false); render(); keepFocus('#fDeck');
   });
 
+  main.addEventListener('keydown', function (e) {
+    if (e.target.id !== 'acIn' || e.key !== 'Enter') return;
+    e.preventDefault();
+    var first = document.querySelector('#acList [data-acadd]');
+    if (first) acAdd(first.getAttribute('data-acadd'));
+  });
+
   document.addEventListener('click', function (e) {
     if (e.target.closest('[data-dropdraft]')) draft = null;
+    var aca = e.target.closest('[data-acadd]');
+    if (aca && main.contains(aca)) { acAdd(aca.getAttribute('data-acadd')); return; }
     var t = e.target.closest('button,[data-act]');
     if (!t || !(main.contains(t) || barAction.contains(t) || fab.contains(t))) return;
     if (t.hasAttribute('data-buy')) {
@@ -1435,11 +1609,12 @@
     } else if (act === 'deleteDeck') {
       var id = t.getAttribute('data-id');
       var deck = deckById(id);
-      if (deck && confirm('Excluir o deck "' + deck.name + '"? Só dá para recuperar por um backup.')) {
+      if (deck && confirm('Excluir "' + deck.name + '"? Só dá para recuperar por um backup. As cartas que você marcou como "tenho" ficam guardadas.')) {
+        deck.cards.forEach(function (c) { putSpare(c.name, c.owned || 0); });
         state.decks = state.decks.filter(function (x) { return x.id !== id; });
         persist(true);
         location.hash = '#/decks';
-        toast('Deck excluído.');
+        toast('Excluído.');
       }
     } else if (act === 'example') {
       loadExamples();
@@ -1449,13 +1624,13 @@
       var txt = document.getElementById('fl').value;
       var out = document.getElementById('friendOut');
       if (!txt.trim()) { out.innerHTML = '<p class="err">Cole a lista do seu amigo primeiro.</p>'; return; }
-      var res = FU.matchFriendList(txt, state.decks, canonical);
-      if (!res.length) { out.innerHTML = '<p class="card pad">Você não tem nenhuma dessas cartas marcada nos seus decks.</p>'; return; }
+      var res = FU.matchFriendList(txt, decksWithSpare(), canonical);
+      if (!res.length) { out.innerHTML = '<p class="card pad">Você não marcou nenhuma dessas cartas como "tenho".</p>'; return; }
       var reply = 'Tenho estas da sua lista:\n' + res.map(function (r) { return Math.min(r.have, r.wants) + ' ' + r.name; }).join('\n');
       out.innerHTML = '<section class="sec" style="margin:0 -16px"><h3 class="sec-h"><span>Você tem ' + res.length + ' da lista dele</span></h3><ul class="rows">' + res.map(function (r) {
         var info = cardInfo(r.name);
         return '<li class="r"><span class="qty">' + Math.min(r.have, r.wants) + '</span><button class="nm" data-card="' + esc(r.name) + '">' + esc(r.name) +
-          '<span class="d">ele quer ' + r.wants + ' · você tem ' + r.have + ' nos decks</span></button>' + manaHtml(info && info.manaCost) + priceCell(info, 1) + '</li>';
+          '<span class="d">ele quer ' + r.wants + ' · você tem ' + r.have + '</span></button>' + manaHtml(info && info.manaCost) + priceCell(info, 1) + '</li>';
       }).join('') + '</ul></section><button class="btn primary full" data-act="shareReply" style="margin-top:12px">' + ICON.share + 'Responder para ele</button>';
       out.setAttribute('data-reply', reply);
     } else if (act === 'shareReply') {
@@ -1472,21 +1647,31 @@
     var format = document.getElementById('df').value;
     var text = document.getElementById('dl').value;
     var err = document.getElementById('formErr');
-    if (!name) { err.textContent = 'Dê um nome para o deck.'; document.getElementById('dn').focus(); return; }
+    if (!name) { err.textContent = 'Dê um nome.'; document.getElementById('dn').focus(); return; }
     var parsed = FU.parseList(text);
     if (text.trim() && !parsed.cards.length) { err.textContent = 'Não encontrei cartas na lista. Use uma carta por linha, ex.: 4 Counterspell.'; document.getElementById('dl').focus(); return; }
     var deck;
     if (id) {
       deck = deckById(id);
       deck.name = name; deck.format = format;
+      var before = {};
+      deck.cards.forEach(function (c) { var k = FU.key(canonical(c.name)); before[k] = (before[k] || 0) + (c.owned || 0); });
       deck.cards = FU.mergeOwned(deck.cards, parsed.cards);
+      var after = {};
+      deck.cards.forEach(function (c) { var k = FU.key(canonical(c.name)); after[k] = (after[k] || 0) + (c.owned || 0); });
+      Object.keys(before).forEach(function (k) {
+        var lost = before[k] - (after[k] || 0);
+        if (lost > 0) { var src = deck.cards.filter(function (c) { return FU.key(canonical(c.name)) === k; }); putSpare(src[0] ? src[0].name : (cardInfo(k) || { name: k }).name, lost); }
+      });
+      deck.cards.forEach(function (c) { if ((c.owned || 0) < c.qty) c.owned = (c.owned || 0) + takeSpare(c.name, c.qty - (c.owned || 0)); });
       persist(true);
     } else {
       deck = addDeck(name, format, text).deck;
-      if (!deck.cards.length) state.ui.view[deck.id + ':tab'] = 'research';
+      if (!deck.cards.length && format !== 'Lista') state.ui.view[deck.id + ':tab'] = 'research';
+      deck.cards.forEach(function (c) { c.owned = takeSpare(c.name, c.qty); });
     }
     location.hash = '#/deck/' + deck.id;
-    toast((id ? 'Deck atualizado.' : 'Deck salvo.') + (parsed.skipped.length ? ' Ignorei ' + parsed.skipped.length + ' linha(s) que não eram cartas.' : ''));
+    toast((format === 'Lista' ? (id ? 'Lista atualizada.' : 'Lista salva.') : (id ? 'Deck atualizado.' : 'Deck salvo.')) + (parsed.skipped.length ? ' Ignorei ' + parsed.skipped.length + ' linha(s) que não eram cartas.' : ''));
     var fresh = deck.cards.map(function (c) { return c.name; }).filter(function (n) { var i = cardInfo(n); return !i || !i.typeLine; });
     if (fresh.length) refreshPrices({ only: fresh, silent: true });
   });
