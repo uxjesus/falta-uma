@@ -1,7 +1,7 @@
 {
-  "name": "Falta Uma",
-  "short_name": "Falta Uma",
-  "description": "O que falta comprar para fechar seus decks de Magic.",
+  "name": "Playset",
+  "short_name": "Playset",
+  "description": "A wantlist dos seus decks de Magic: o que falta comprar para fechá-los.",
   "lang": "pt-BR",
   "start_url": "./#/falta",
   "scope": "./",

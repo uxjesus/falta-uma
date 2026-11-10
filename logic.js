@@ -1,4 +1,4 @@
-/* Falta Uma — regras puras (sem tela). Testável fora do navegador. */
+/* Playset — regras puras (sem tela). Testável fora do navegador. */
 (function (root) {
   'use strict';
 

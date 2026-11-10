@@ -1,4 +1,4 @@
-/* Falta Uma — tela e dados. Depende de logic.js (window.FU). */
+/* Playset — tela e dados. Depende de logic.js (window.FU). */
 (function () {
   'use strict';
   var FU = window.FU;
@@ -837,8 +837,8 @@
   function heroHtml() {
     var a = heroArt();
     return '<section class="hero">' + (a ? '<img class="art" src="' + esc(a) + '" alt="" decoding="async">' : '') + '<span class="shade" aria-hidden="true"></span>' +
-      '<div class="info"><p class="wordmark"><img src="icons/icon-192.png" alt="" width="40" height="40">Falta Uma</p>' +
-      '<p class="tagline">O que falta para fechar seus decks</p></div></section>';
+      '<div class="info"><p class="wordmark"><img src="icons/icon-192.png" alt="" width="40" height="40">Playset</p>' +
+      '<p class="tagline">A wantlist dos seus decks</p></div></section>';
   }
   function viewFalta() {
     var ui = state.ui;
@@ -1003,7 +1003,7 @@
       '<button class="btn full" data-act="backup">Enviar backup por e-mail</button>' +
       '<label class="btn full" for="restore" style="margin-top:8px">Restaurar de um arquivo</label>' +
       '<input type="file" id="restore" accept=".json,application/json" class="visually-hidden"></section>' +
-      '<p class="xs muted">Dados, imagens e símbolos das cartas: Scryfall. Falta Uma não é afiliado à Wizards of the Coast.</p></div>';
+      '<p class="xs muted">Dados, imagens e símbolos das cartas: Scryfall. Playset não é afiliado à Wizards of the Coast.</p></div>';
   }
 
   /* ---------- caderno de pesquisa ---------- */
@@ -1299,7 +1299,7 @@
     if (!needsBackup() && pip) { pip.nextElementSibling.remove(); pip.remove(); }
     var titles = { falta: 'O que me falta', decks: 'Decks', mais: 'Mais', novo: 'Adicionar deck', editar: 'Editar deck', fonte: 'Adicionar fonte' };
     var d = r.name === 'deck' ? deckById(r.id) : null;
-    document.title = (d ? d.name : (titles[r.name] || 'O que me falta')) + ' · Falta Uma';
+    document.title = (d ? d.name : (titles[r.name] || 'O que me falta')) + ' · Playset';
     if (r.name === 'decks') main.innerHTML = viewDecks();
     else if (r.name === 'deck') main.innerHTML = viewDeck(r.id);
     else if (r.name === 'novo') main.innerHTML = viewForm(null);
@@ -1508,7 +1508,7 @@
         toast('Backup restaurado.');
         location.hash = '#/decks';
         render();
-      } catch (er) { toast('Esse arquivo não é um backup do Falta Uma.'); }
+      } catch (er) { toast('Esse arquivo não é um backup do Playset.'); }
     };
     reader.readAsText(f);
   });
@@ -1517,12 +1517,12 @@
     var now = Date.now();
     var json = JSON.stringify({ app: 'falta-uma', version: 1, savedAt: now, state: state, cards: db });
     var d = new Date(now);
-    var fname = 'falta-uma-backup-' + d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + '.json';
+    var fname = 'playset-backup-' + d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + '.json';
     var file = null;
     try { file = new File([json], fname, { type: 'application/json' }); } catch (e) {}
     var done = function () { state.lastBackup = now; persist(false); render(); toast('Backup pronto.'); };
     if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-      navigator.share({ files: [file], title: 'Backup Falta Uma', text: 'Backup dos meus decks (Falta Uma) de ' + fmtDate(now) }).then(done).catch(function () {});
+      navigator.share({ files: [file], title: 'Backup Playset', text: 'Backup dos meus decks (Playset) de ' + fmtDate(now) }).then(done).catch(function () {});
     } else {
       var a = document.createElement('a');
       a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
