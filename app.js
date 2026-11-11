@@ -963,7 +963,7 @@
       return heroHtml() + '<div class="card empty stack"><h1 style="font-size:1.5rem">O que me falta</h1>' +
         '<p class="muted">Cole a lista de um deck e eu somo tudo o que falta, carta por carta, com preço salvo para ver sem internet.</p>' +
         '<a class="btn primary full" href="#/novo">' + ICON.plus + 'Adicionar deck</a>' +
-        '<button class="btn full" data-act="example">Ver com decks de exemplo</button></div>';
+        '<button class="btn full" data-act="example">Ver com decks de exemplo</button></div>' + addCardHtml({ id: SOLTAS_ID }, true);
     }
     var scopeName = scopeLabel();
     var html = heroHtml() + '<header class="head compact"><h1 class="visually-hidden">O que me falta' + (scopeName ? ': ' + esc(scopeName) : '') + '</h1>' +
@@ -975,7 +975,7 @@
         toolBtn('data-act="refresh"', ICON.refresh, 'Atualizar preços')
       ], 'falta');
 
-    if (!items.length) return html + '<div class="card empty"><p><strong>Nada faltando aqui.</strong></p></div>';
+    if (!items.length) return html + '<div class="card empty"><p><strong>Nada faltando aqui.</strong></p></div>' + addCardHtml({ id: SOLTAS_ID }, true);
     var grid = ui.fview !== 'list';
     groupByType(items, function (i) { return i.name; }).forEach(function (g) {
       sortItems(g.items, function (i) { return i.name; }, function (i) { return i.total; });
@@ -1004,7 +1004,7 @@
       });
       html += '</ul></section>';
     });
-    return html + '<p class="foot">Terrenos básicos não entram. Preço: o que você anotou da Liga Magic ou a edição mais barata no Scryfall, convertida para real.</p>';
+    return html + addCardHtml({ id: SOLTAS_ID }, true) + '<p class="foot">Terrenos básicos não entram. Preço: o que você anotou da Liga Magic ou a edição mais barata no Scryfall, convertida para real.</p>';
   }
 
   function viewDeck(id) {
@@ -1073,11 +1073,26 @@
     html += '<p class="foot">' + (view === 'list' ? 'Toque no marcador à direita para dizer que tem todas (ou nenhuma). ' : '') + 'Toque numa carta para mudar a quantidade, mover para o sideboard, tirar do deck ou ajustar quantas você tem.</p>';
     return html;
   }
-  function addCardHtml(d) {
-    return '<section class="sec addcard" aria-labelledby="acL"><h2 class="sec-h" id="acL">Adicionar carta</h2><div class="form" style="padding-top:8px;gap:8px">' +
+  /* Lista "Soltas": cartas avulsas que a pessoa quer, sem deck. Criada sozinha na primeira carta. */
+  var SOLTAS_ID = 'soltas';
+  function soltasDeck(create) {
+    var d = deckById(SOLTAS_ID);
+    if (!d && create) {
+      d = { id: SOLTAS_ID, name: 'Soltas', format: 'Lista', loose: true, cards: [], createdAt: Date.now() };
+      state.decks.push(d);
+    }
+    return d;
+  }
+  /* Campo "Adicionar carta": no fim de cada deck/lista e no fim da tela inicial (vai para Soltas). */
+  function addCardHtml(d, loose) {
+    var help = loose
+      ? 'A carta vai para a lista “Soltas” e entra em “O que falta”. Depois você pode movê-la para um deck.'
+      : 'Entra 1 cópia no principal. Depois toque na carta para ajustar.';
+    return '<section class="sec addcard" aria-labelledby="acL"><h2 class="sec-h" id="acL">' + (loose ? 'Adicionar carta solta' : 'Adicionar carta') + '</h2><div class="form" style="padding-top:8px;gap:8px">' +
       '<label for="acIn" class="visually-hidden">Nome da carta</label>' +
-      '<input type="text" id="acIn" data-acdeck="' + esc(d.id) + '" autocomplete="off" spellcheck="false" autocapitalize="off" enterkeyhint="search" placeholder="Digite o nome (em inglês)" aria-describedby="acHelp" aria-controls="acList">' +
-      '<p class="xs muted" id="acHelp">Entra 1 cópia no principal. Depois toque na carta para ajustar.</p>' +
+      '<div class="acrow"><input type="text" id="acIn" data-acdeck="' + esc(d.id) + '" autocomplete="off" spellcheck="false" autocapitalize="off" enterkeyhint="search" placeholder="Nome da carta (inglês ou português)" aria-describedby="acHelp" aria-controls="acList">' +
+      '<button type="button" class="btn primary" data-acgo>' + ICON.plus + 'Adicionar</button></div>' +
+      '<p class="xs muted" id="acHelp">' + help + '</p>' +
       '<p class="visually-hidden" id="acLive" aria-live="polite"></p><ul class="aclist" id="acList"></ul></div></section>';
   }
   var acTimer = null, acSeq = 0;
@@ -1087,11 +1102,50 @@
     names.forEach(function (n) { var nk = FU.norm(n); if (!seen[nk] && nk.indexOf(k) !== -1) { seen[nk] = 1; out.push(n); } });
     return out.sort(function (a, b) { return (FU.norm(a).indexOf(k) - FU.norm(b).indexOf(k)) || a.localeCompare(b); }).slice(0, 8);
   }
-  function acShow(list, q) {
+  /* list: nomes (texto) ou { name, label, sub }. status: '' | 'loading' */
+  function acShow(list, q, status) {
     var ul = document.getElementById('acList'), live = document.getElementById('acLive');
     if (!ul) return;
-    ul.innerHTML = list.map(function (n) { return '<li><button type="button" class="acopt" data-acadd="' + esc(n) + '">' + ICON.plus + '<span>' + esc(n) + '</span></button></li>'; }).join('');
-    if (live) live.textContent = q ? (list.length ? list.length + (list.length === 1 ? ' sugestão' : ' sugestões') : 'Nenhuma carta encontrada') : '';
+    var items = list.map(function (n) { return typeof n === 'string' ? { name: n, label: n } : n; });
+    var html = items.map(function (o) {
+      return '<li><button type="button" class="acopt" data-acadd="' + esc(o.name) + '">' + ICON.plus +
+        '<span class="acn">' + esc(o.label) + (o.sub ? '<small>' + esc(o.sub) + '</small>' : '') + '</span><span class="acgo">Adicionar</span></button></li>';
+    }).join('');
+    if (!items.length && q) {
+      html = status === 'loading'
+        ? '<li class="acnone" role="status">Buscando…</li>'
+        : '<li class="acnone" role="status">Nenhuma carta encontrada para “' + esc(q) + '”.<small>Confira a grafia. Dá para digitar só parte do nome, em inglês ou em português.</small></li>';
+    }
+    ul.innerHTML = html;
+    if (live) live.textContent = !q ? '' : (items.length ? items.length + (items.length === 1 ? ' sugestão' : ' sugestões') : (status === 'loading' ? 'Buscando' : 'Nenhuma carta encontrada'));
+  }
+  var AC_STOP = { de: 1, da: 1, do: 1, das: 1, dos: 1, e: 1, a: 1, o: 1, the: 1, of: 1 };
+  function acGet(url) {
+    return fetch(SCRY + url, { headers: { 'Accept': 'application/json' } }).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+  }
+  /* Busca pelo nome impresso em português (ex.: "Vingança de Akroma"). Devolve o nome em inglês para adicionar. */
+  function acPortuguese(q) {
+    var words = FU.norm(q).split(' ').filter(function (w) { return w.length > 1 && !AC_STOP[w]; });
+    if (!words.length) return Promise.resolve([]);
+    words = words.map(function (w) { return w.replace(/[^a-z0-9']/g, ''); }).filter(Boolean);
+    if (!words.length) return Promise.resolve([]);
+    var query = 'lang:pt ' + words.join(' ');
+    return acGet('/cards/search?include_multilingual=true&order=name&q=' + encodeURIComponent(query)).then(function (j) {
+      var seen = {}, out = [];
+      ((j && j.data) || []).forEach(function (c) {
+        if (seen[c.name]) return;
+        seen[c.name] = 1;
+        var pt = c.printed_name || (c.card_faces && c.card_faces[0] && c.card_faces[0].printed_name);
+        out.push({ name: c.name, label: pt && pt !== c.name ? pt : c.name, sub: pt && pt !== c.name ? c.name : '' });
+      });
+      return out.slice(0, 10);
+    });
+  }
+  /* Última tentativa: nome aproximado (corrige erro de digitação). */
+  function acFuzzy(q) {
+    return acGet('/cards/named?fuzzy=' + encodeURIComponent(q)).then(function (c) {
+      return c && c.object === 'card' ? [{ name: c.name, label: c.name }] : [];
+    });
   }
   function acSearch(q) {
     q = q.trim();
@@ -1099,32 +1153,51 @@
     document.getElementById('toast').classList.remove('show');
     if (q.length < 2) { acShow([], ''); return; }
     var local = acLocal(q);
-    acShow(local, q);
-    if (!navigator.onLine) return;
-    fetch(SCRY + '/cards/autocomplete?q=' + encodeURIComponent(q), { headers: { 'Accept': 'application/json' } })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (j) {
-        if (seq !== acSeq || !j || !j.data) return;
-        var seen = {}, merged = [];
-        local.concat(j.data).forEach(function (n) { var nk = FU.norm(n); if (!seen[nk]) { seen[nk] = 1; merged.push(n); } });
-        acShow(merged.slice(0, 10), q);
-      }).catch(function () {});
+    var online = navigator.onLine;
+    acShow(local, q, online ? 'loading' : '');
+    if (!online) return;
+    var done = function (list) { if (seq === acSeq) acShow(list, q, ''); };
+    acGet('/cards/autocomplete?q=' + encodeURIComponent(q)).then(function (j) {
+      if (seq !== acSeq) return;
+      var seen = {}, merged = [];
+      local.concat((j && j.data) || []).forEach(function (n) { var nk = FU.norm(n); if (!seen[nk]) { seen[nk] = 1; merged.push(n); } });
+      if (merged.length) return done(merged.slice(0, 10));
+      return acPortuguese(q).then(function (pt) {
+        if (pt.length) return done(pt);
+        return acFuzzy(q).then(done);
+      });
+    });
   }
   function acAdd(name) {
     var inp = document.getElementById('acIn');
-    var d = inp && deckById(inp.getAttribute('data-acdeck'));
-    if (!d || !name) return;
+    if (!inp || !name) return;
+    var did = inp.getAttribute('data-acdeck');
+    var loose = did === SOLTAS_ID;
+    var d = loose ? soltasDeck(true) : deckById(did);
+    if (!d) return;
     var nm = canonical(name);
-    if (d.cards.some(function (c) { return c.board === 'main' && FU.key(canonical(c.name)) === FU.key(nm); })) {
-      toast('Já está no deck. Toque na carta para mudar a quantidade.'); return;
-    }
-    addToDeck(d, nm, 1, 'main');
+    var ex = d.cards.filter(function (c) { return c.board === 'main' && FU.key(canonical(c.name)) === FU.key(nm); })[0];
+    if (ex && !loose) { toast('Já está no deck. Toque na carta para mudar a quantidade.'); return; }
+    var msg;
+    if (ex) { setQty(ex, ex.qty + 1); msg = 'Agora são ' + ex.qty + ' de ' + nm + ' em Soltas.'; }
+    else { addToDeck(d, nm, 1, 'main'); msg = loose ? 'Adicionada a Soltas: ' + nm + '.' : 'Adicionada: ' + nm + '.'; }
+    if (loose && scopeDecks().indexOf(d) === -1) { state.ui.fmt = 'all'; state.ui.deck = 'all'; msg += ' Mostrando todos os decks.'; }
     persist(true);
     var y = window.scrollY; render(); window.scrollTo(0, y);
     var again = document.getElementById('acIn'); if (again) again.focus({ preventScroll: true });
-    toast('Adicionada: ' + nm + '.');
+    toast(msg);
     var i = cardInfo(nm);
     if (!i || !i.typeLine) refreshPrices({ only: [nm], silent: true });
+  }
+  /* Botão "Adicionar": usa a primeira sugestão da lista. */
+  function acGo() {
+    var inp = document.getElementById('acIn');
+    if (!inp) return;
+    if (inp.value.trim().length < 2) { toast('Digite o nome da carta.'); inp.focus(); return; }
+    var first = document.querySelector('#acList [data-acadd]');
+    if (first) { acAdd(first.getAttribute('data-acadd')); return; }
+    if (!navigator.onLine) { toast('Sem internet: só acho cartas que o app já conhece.'); return; }
+    toast('Ainda não achei essa carta. Confira a grafia.');
   }
 
   function viewForm(id, asList) {
@@ -1517,6 +1590,7 @@
     if (e.target.closest('[data-dropdraft]')) draft = null;
     var aca = e.target.closest('[data-acadd]');
     if (aca && main.contains(aca)) { acAdd(aca.getAttribute('data-acadd')); return; }
+    if (e.target.closest('[data-acgo]')) { acGo(); return; }
     var t = e.target.closest('button,[data-act]');
     if (!t || !(main.contains(t) || barAction.contains(t) || fab.contains(t))) return;
     if (t.hasAttribute('data-buy')) {

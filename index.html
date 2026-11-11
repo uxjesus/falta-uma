@@ -56,7 +56,7 @@ h1,h2,h3{margin:0}
 .wrap{max-width:880px;margin:0 auto}
 
 /* botões */
-.btn{min-height:var(--tap);padding:0 16px;border-radius:var(--r-sm);border:1px solid var(--line-strong);background:transparent;
+.btn{min-height:var(--tap);padding:0 16px;border-radius:var(--r-sm);border:1.5px solid var(--accent);background:var(--accent-soft);
   font-weight:700;font-size:.9375rem;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none;color:var(--text);
   transition:transform .08s ease,background-color .15s ease;white-space:nowrap}
 .btn:active{transform:scale(.97)}
@@ -322,7 +322,7 @@ body.home .appbar{display:none}
 .statline{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
 .statline .updated{margin:0}
 /* capa do deck e edições no pop-up */
-.btn[aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
+.btn[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 .edbar{display:grid;grid-template-columns:44px minmax(0,1fr) 44px;align-items:center;gap:4px 8px;padding:0 12px 12px;text-align:center}
 .edbar .full{grid-column:1/-1;justify-content:center}
 .edbar p{font-size:.875rem;line-height:1.35}
@@ -348,6 +348,14 @@ body.home .appbar{display:none}
 .aclist li:last-child .acopt{border-bottom:0}
 .acopt:active{background:var(--surface-2)}
 .acopt .icon{color:var(--accent);width:18px;height:18px}
+/* v0.13: botões secundários com fundo suave; busca de carta com botão e aviso visíveis */
+.btn:disabled,.btn[disabled]{opacity:.5;cursor:default}
+.acrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
+.acopt .acn{flex:1;min-width:0}
+.acopt .acn small{display:block;color:var(--muted);font-weight:500;font-size:.8125rem}
+.acopt .acgo{color:var(--accent);font-weight:800;font-size:.875rem}
+.acnone{padding:12px;background:var(--surface);color:var(--text);font-weight:600}
+.acnone small{display:block;color:var(--muted);font-weight:500;font-size:.8125rem;margin-top:2px}
 </style>
 </head>
 <body>
