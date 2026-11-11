@@ -160,6 +160,8 @@
     state.decks.forEach(function (d) {
       d.cards.forEach(function (c) { set[FU.key(c.name)] = c.name; });
     });
+    var sp = state.spare || {};
+    Object.keys(sp).forEach(function (k) { if (sp[k] && sp[k].qty > 0 && sp[k].name) set[FU.key(sp[k].name)] = sp[k].name; });
     return Object.keys(set).map(function (k) { return set[k]; });
   }
 
@@ -452,7 +454,8 @@
       ? (est != null ? '≈ ' + brl.format(est) + ' · ' : '') + usdF.format(uUsd) + (info.minSet ? ' na edição mais barata (' + esc(info.minSet) + ')' : '') + ' no Scryfall, mercado americano'
       : null;
     var priceHtml = note
-      ? '<p class="big">' + brl.format(note.brl) + '</p><p class="xs muted">' + (note.src === 'print' ? 'Preço médio de venda na Liga Magic em ' : 'Anotado da Liga Magic em ') + esc(fmtDate(note.at)) + '</p>' +
+      ? '<p class="big">' + brl.format(note.brl) + '</p><p class="xs muted">' + (note.src === 'print' ? 'Preço médio de venda na Liga Magic em ' : 'Anotado da Liga Magic em ') + esc(fmtDate(note.at)) + ' (' + ligaAgeText(note) + ')</p>' +
+        (ligaDays(note) > LIGA_STALE ? '<p class="small" style="margin-top:4px;color:var(--miss);font-weight:700">Preço antigo. Confira na Liga antes de fechar a troca.</p>' : '') +
         (note.src === 'print' && (note.min != null || note.max != null) ? '<p class="small" style="margin-top:4px">Menor <strong>' + (note.min != null ? brl.format(note.min) : '-') + '</strong> · Maior <strong>' + (note.max != null ? brl.format(note.max) : '-') + '</strong></p>' : '') + (estLine ? '<p class="xs muted" style="margin-top:4px">Referência: ' + estLine + '</p>' : '')
       : estLine
         ? '<p class="big">' + (est != null ? '≈ ' + brl.format(est) : usdF.format(uUsd)) + '</p><p class="xs muted">' + usdF.format(uUsd) + (info.minSet ? ' na edição mais barata (' + esc(info.minSet) + ')' : '') + ' no Scryfall (mercado americano), convertido pelo dólar do dia · ' + esc(ago(info.minAt || info.updatedAt)) + '</p>'
@@ -725,9 +728,23 @@
     });
     return v;
   }
+  var LIGA_STALE = 30;
+  function ligaDays(n) { return n && n.at ? Math.floor((Date.now() - n.at) / 864e5) : 0; }
+  function ligaUrl(name) { return 'https://www.ligamagic.com.br/?view=cards/card&card=' + encodeURIComponent(String(name).split(' // ')[0]); }
+  function ligaSearchUrl(text) { return 'https://www.ligamagic.com.br/?view=cards/search&card=' + encodeURIComponent(text); }
+  function ligaAgeText(n) { var d = ligaDays(n); return d < 1 ? 'hoje' : (d === 1 ? 'há 1 dia' : 'há ' + d + ' dias'); }
   function priceCell(info, qty) {
-    var t = moneyShort(info, qty);
-    return t ? '<span class="pr">' + t + '</span>' : '<span class="pr na">' + (info && info.notFound ? 'não achei' : '—') + '</span>';
+    var t = moneyShort(info, qty), n = ligaNote(info);
+    if (!t) return '<span class="pr na">' + (info && info.notFound ? 'não achei' : '—') + '</span>';
+    var stale = n && ligaDays(n) > LIGA_STALE;
+    return '<span class="pr' + (stale ? ' old' : '') + '">' + t + (n ? '<small>Liga' + (stale ? ' · ' + ligaAgeText(n) : '') + '</small>' : '') + '</span>';
+  }
+  var ICO_EXT = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg>';
+  /* Na linha da lista: custo de mana + atalho de um toque para a página da carta na Liga Magic. */
+  function rowTools(info, name) {
+    var nm = info && !info.notFound ? info.name : name;
+    return '<span class="rx">' + manaHtml(info && info.manaCost) +
+      '<a class="lg" href="' + esc(ligaUrl(nm)) + '" target="_blank" rel="noopener" aria-label="Ver ' + esc(nm) + ' na Liga Magic (abre no navegador)">' + ICO_EXT + '</a></span>';
   }
   function priceStatus() {
     if (refreshing) return '<span id="priceStatus" aria-live="polite">' + esc(statusExtra || 'Atualizando preços…') + '</span>';
@@ -805,7 +822,7 @@
     var info = cardInfo(c.name);
     return '<li class="r"><span class="q' + (FU.missingOf(c) ? ' miss' : '') + '">' + c.qty + '</span>' +
       '<button class="nm" data-card="' + esc(c.name) + '">' + esc(canonical(c.name)) + (info && info.notFound ? '<span class="flag">não achei</span>' : '') + '</button>' +
-      manaHtml(info && info.manaCost) + ownBtn(c, idx) + '</li>';
+      rowTools(info, c.name) + ownBtn(c, idx) + '</li>';
   }
   function gridCard(d, c) {
     var info = cardInfo(c.name);
@@ -1030,7 +1047,7 @@
         html += '<li class="r"><span class="q miss" aria-label="faltam ' + i.total + '">' + i.total + '</span>' +
           '<button class="nm" data-card="' + esc(i.name) + '">' + esc(i.name) +
           (state.decks.length > 1 && ui.deck === 'all' ? '<span class="d">' + i.decks.map(function (d) { return esc(d.deckName) + (i.decks.length > 1 ? ' ' + d.qty : ''); }).join(' · ') + '</span>' : '') + '</button>' +
-          manaHtml(info && info.manaCost) + priceCell(info, i.total) + '</li>';
+          rowTools(info, i.name) + priceCell(info, i.total) + '</li>';
       });
       html += '</ul></section>';
     });
@@ -1270,7 +1287,8 @@
     return '<section class="card pad stack" aria-labelledby="lg"><h2 id="lg" style="font-size:1.0625rem">Preços da Liga Magic (Brasil)</h2>' +
       '<p class="muted small">Tire print da página da carta na Liga e a sua IA lê os valores: menor, médio e maior. Ficam salvos no aparelho, sem internet, com a data.</p>' +
       '<p class="small"><strong>' + cv.have + ' de ' + cv.total + '</strong> cartas com preço da Liga' + (cv.last ? ' · último em ' + esc(fmtDate(cv.last)) : '') + '</p>' +
-      '<a class="btn primary full" href="#/precos">Importar preços por print</a></section>';
+      '<a class="btn primary full" href="#/precos">Importar preços por print</a>' +
+      '<a class="btn full" href="#/troca">' + ICO.swap + 'Modo troca</a></section>';
   }
   function viewMais() {
     barAction.innerHTML = ''; fab.innerHTML = '';
@@ -1602,6 +1620,7 @@
     var cnt = function (r) { return tab === 'all' ? r.total : r.spare; };
     var items = all.filter(function (r) { return cnt(r) > 0; });
     var html = '<header class="head"><h1>Coleção</h1><p class="metaline">' + allN + (allN === 1 ? ' carta' : ' cartas') + ' que você tem · ' + outN + ' fora dos decks</p></header>' +
+      '<div style="padding:0 16px 12px"><a class="btn primary full" href="#/troca">' + ICO.swap + 'Modo troca: ver preço na Liga</a></div>' +
       '<div class="tabsbar" role="tablist" aria-label="Coleção">' +
       '<button role="tab" data-ctab="out" aria-selected="' + (tab === 'out') + '">Fora dos decks (' + outN + ')</button>' +
       '<button role="tab" data-ctab="all" aria-selected="' + (tab === 'all') + '">Tudo que tenho (' + allN + ')</button></div>' +
@@ -1628,7 +1647,7 @@
             if (r.eds.length) parts.push(edsShort(r.eds));
             return '<li class="r"><span class="q" aria-label="você tem ' + cnt(r) + '">' + cnt(r) + '</span>' +
               '<button class="nm" data-card="' + esc(r.name) + '">' + esc(r.name) + (parts.length ? '<span class="d">' + esc(parts.join(' · ')) + '</span>' : '') + '</button>' +
-              manaHtml(info && info.manaCost) + priceCell(info, cnt(r)) + '</li>';
+              rowTools(info, r.name) + priceCell(info, cnt(r)) + '</li>';
           }).join('') + '</ul>';
         }
         html += '</section>';
@@ -1651,6 +1670,61 @@
       'Coloque a lista inteira dentro de um único bloco de código, para eu copiar com um toque.',
       'Agora vou enviar as fotos.'
     ].join('\n\n');
+  }
+
+
+  /* ---------- modo troca: preço salvo + atalho para a Liga, rápido na mesa ---------- */
+  ICO.swap = svg('<path d="M7 7h12M16 3l4 4-4 4M17 17H5M8 13l-4 4 4 4"/>');
+  var trQuery = '';
+  function trocaMatches(q) {
+    var words = FU.norm(q).split(/\s+/).filter(Boolean);
+    if (!words.length) return [];
+    var set = {};
+    ligaNames().forEach(function (n) { set[FU.key(canonical(n))] = canonical(n); });
+    Object.keys(db.cards).forEach(function (k) { var c = db.cards[k]; if (c && !c.notFound && c.name && !FU.isBasic(c.name)) set[FU.key(c.name)] = c.name; });
+    var out = Object.keys(set).map(function (k) { return set[k]; }).filter(function (n) {
+      var nn = FU.norm(n);
+      return words.every(function (w) { return nn.indexOf(w) !== -1; });
+    });
+    var first = FU.norm(q);
+    out.sort(function (a, b) {
+      var A = FU.norm(a).indexOf(first) === 0 ? 0 : 1, B = FU.norm(b).indexOf(first) === 0 ? 0 : 1;
+      return A - B || a.localeCompare(b);
+    });
+    return out.slice(0, 8);
+  }
+  function trocaRow(name) {
+    var info = cardInfo(name), n = ligaNote(info);
+    var price;
+    if (n) {
+      var stale = ligaDays(n) > LIGA_STALE;
+      price = '<span class="v">' + brl.format(n.brl) + '</span>' +
+        (n.src === 'print' && (n.min != null || n.max != null) ? '<span class="small muted">menor ' + (n.min != null ? brl.format(n.min) : '-') + ' · maior ' + (n.max != null ? brl.format(n.max) : '-') + '</span>' : '') +
+        '<span class="small ' + (stale ? 'old' : 'muted') + '">Liga, ' + ligaAgeText(n) + (stale ? ' · confira' : '') + '</span>';
+    } else {
+      var est = moneyShort(info, 1);
+      price = est ? '<span class="v">' + est + '</span><span class="small muted">estimativa do Scryfall, sem preço da Liga salvo</span>' : '<span class="small muted">Sem preço salvo</span>';
+    }
+    return '<li class="tr"><button class="nm" data-card="' + esc(name) + '">' + esc(name) + '</button>' +
+      '<a class="btn primary go" href="' + esc(ligaUrl(name)) + '" target="_blank" rel="noopener">Abrir na Liga' + ICO_EXT + '</a>' +
+      '<div class="tp">' + price + '</div></li>';
+  }
+  function trocaOut() {
+    var q = trQuery.trim();
+    if (!q) return '<p class="muted small" style="padding:12px 16px">Digite o nome da carta. Mostro o preço salvo e abro a Liga com um toque.</p>';
+    var m = trocaMatches(q);
+    return (m.length ? '<ul class="trlist">' + m.map(trocaRow).join('') + '</ul>' : '<p class="muted small" style="padding:12px 16px">Nenhuma carta sua com esse nome.</p>') +
+      '<a class="btn full trfree go" href="' + esc(ligaSearchUrl(q)) + '" target="_blank" rel="noopener">Buscar “' + esc(q) + '” na Liga Magic' + ICO_EXT + '</a>';
+  }
+  function viewTroca() {
+    barAction.innerHTML = ''; fab.innerHTML = '';
+    var cv = ligaCoverage();
+    return '<header class="head"><a href="#/colecao" class="link" style="margin-left:-4px">' + ICON.back + 'Voltar</a><h1>Modo troca</h1>' +
+      '<p class="metaline">' + cv.have + ' de ' + cv.total + ' cartas suas com preço da Liga salvo</p></header>' +
+      '<div class="form"><label for="trIn" class="visually-hidden">Nome da carta</label>' +
+      '<input type="search" id="trIn" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Nome da carta, em português ou inglês" value="' + esc(trQuery) + '"></div>' +
+      (navigator.onLine ? '' : '<p class="small" role="status" style="padding:0 16px;color:var(--miss);font-weight:700">Sem internet agora. Valem os preços salvos.</p>') +
+      '<div id="trOut" aria-live="polite">' + trocaOut() + '</div>';
   }
 
   /* ---------- preços da Liga Magic por print ---------- */
@@ -1962,8 +2036,8 @@
   }
   function render() {
     var r = route();
-    var tab = ({ precos: 'mais', deck: 'decks', novo: 'decks', editar: 'decks', fonte: 'decks', foto: r.id === 'colecao' ? 'colecao' : 'decks' })[r.name] || r.name;
-    document.body.classList.toggle('home', ['decks', 'deck', 'novo', 'editar', 'mais', 'fonte', 'colecao', 'foto', 'precos'].indexOf(r.name) === -1);
+    var tab = ({ troca: 'colecao', precos: 'mais', deck: 'decks', novo: 'decks', editar: 'decks', fonte: 'decks', foto: r.id === 'colecao' ? 'colecao' : 'decks' })[r.name] || r.name;
+    document.body.classList.toggle('home', ['decks', 'deck', 'novo', 'editar', 'mais', 'fonte', 'colecao', 'foto', 'precos', 'troca'].indexOf(r.name) === -1);
     document.querySelectorAll('nav.tabs a').forEach(function (a) {
       if (a.getAttribute('data-tab') === tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     });
@@ -1971,7 +2045,7 @@
     var pip = mais.querySelector('.pip');
     if (needsBackup() && !pip) mais.insertAdjacentHTML('beforeend', '<span class="pip"></span><span class="visually-hidden"> (backup pendente)</span>');
     if (!needsBackup() && pip) { pip.nextElementSibling.remove(); pip.remove(); }
-    var titles = { falta: 'O que me falta', decks: 'Decks', mais: 'Mais', novo: 'Adicionar deck', editar: 'Editar deck', fonte: 'Adicionar fonte', colecao: 'Coleção', foto: 'Importar por foto', precos: 'Preços da Liga' };
+    var titles = { falta: 'O que me falta', decks: 'Decks', mais: 'Mais', novo: 'Adicionar deck', editar: 'Editar deck', fonte: 'Adicionar fonte', colecao: 'Coleção', foto: 'Importar por foto', precos: 'Preços da Liga', troca: 'Modo troca' };
     var d = r.name === 'deck' ? deckById(r.id) : null;
     document.title = (d ? d.name : (titles[r.name] || 'O que me falta')) + ' · Playset';
     if (r.name === 'decks') main.innerHTML = viewDecks();
@@ -1983,6 +2057,7 @@
     else if (r.name === 'colecao') main.innerHTML = viewColecao();
     else if (r.name === 'foto') main.innerHTML = viewFoto(r.id);
     else if (r.name === 'precos') main.innerHTML = viewPrecos();
+    else if (r.name === 'troca') main.innerHTML = viewTroca();
     else main.innerHTML = viewFalta();
   }
   var lastRoute = null;
@@ -2006,6 +2081,7 @@
   function keepFocus(sel) { var el = main.querySelector(sel); if (el) el.focus({ preventScroll: true }); }
 
   main.addEventListener('input', function (e) {
+    if (e.target.id === 'trIn') { trQuery = e.target.value; var o = document.getElementById('trOut'); if (o) o.innerHTML = trocaOut(); return; }
     if (e.target.id === 'acIn') { clearTimeout(acTimer); var v = e.target.value; acTimer = setTimeout(function () { acSearch(v); }, 250); return; }
     if (e.target.id !== 'st' || route().name !== 'fonte') return;
     var h = document.getElementById('srcHint');
@@ -2021,6 +2097,7 @@
   });
 
   main.addEventListener('keydown', function (e) {
+    if (e.target.id === 'trIn' && e.key === 'Enter') { e.preventDefault(); var g = document.querySelector('#trOut a.go'); if (g) g.click(); return; }
     if (e.target.id !== 'acIn' || e.key !== 'Enter') return;
     e.preventDefault();
     var first = document.querySelector('#acList [data-acadd]');
