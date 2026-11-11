@@ -379,7 +379,49 @@
     return { kept: r.taken, removed: r.rest };
   }
 
+  /* Preço em reais como a Liga mostra ("R$ 1.234,56", "7,72", "3"). null = vazio ou "-"; NaN = não é número. */
+  function parsePriceBR(tok) {
+    var s = String(tok == null ? '' : tok).replace(/R\$/gi, '').replace(/\s/g, '');
+    if (!s || /^[-–—?]+$/.test(s)) return null;
+    if (!/^\d[\d.,]*$/.test(s)) return NaN;
+    var m = s.match(/^(\d[\d.,]*?)[.,](\d{1,2})$/);
+    return m ? parseFloat(m[1].replace(/[.,]/g, '') + '.' + m[2]) : parseFloat(s.replace(/[.,]/g, ''));
+  }
+  /* Lê a resposta da IA: "Nome em inglês | menor | médio | maior", uma carta por linha. */
+  function parseLigaPrices(text) {
+    var rows = [], skipped = [];
+    String(text || '').replace(/```[a-z]*/gi, '').split(/\r?\n/).forEach(function (line) {
+      var l = line.trim();
+      if (!l || /^[|:\-\s]+$/.test(l)) return;
+      l = l.replace(/^\|/, '').replace(/\|$/, '');
+      var parts = l.split(/\s*[|\t;]\s*/).filter(function (x) { return x !== ''; });
+      var name, toks;
+      if (parts.length >= 2) { name = parts[0]; toks = parts.slice(1); }
+      else {
+        var w = l.replace(/R\$\s*/gi, '').split(/\s+/), t = [];
+        while (w.length > 1 && t.length < 3 && /^(R\$)?[\d.,]+$|^[-–—]$/i.test(w[w.length - 1])) t.unshift(w.pop());
+        name = w.join(' ').replace(/R\$$/i, '').trim(); toks = t;
+      }
+      name = name.replace(/[`*"]/g, '').replace(/^\s*[-•]\s*/, '').replace(/\s*\?+$/, '').trim();
+      if (!name) return;
+      var vals = toks.map(parsePriceBR);
+      if (!vals.length || vals.some(function (v) { return v !== null && (isNaN(v) || v < 0); })) {
+        if (!/^(nome|carta|card|name)\b/i.test(name)) skipped.push(l);
+        return;
+      }
+      var min, avg, max;
+      if (vals.length >= 3) { min = vals[0]; avg = vals[1]; max = vals[2]; }
+      else if (vals.length === 1) { avg = vals[0]; min = null; max = null; }
+      else { skipped.push(l); return; }
+      if (!(avg > 0) || avg > 100000) { skipped.push(l); return; }
+      var odd = (min != null && min > avg) || (max != null && max < avg);
+      rows.push({ raw: name, name: name, min: min, avg: avg, max: max, odd: odd });
+    });
+    return { rows: rows, skipped: skipped };
+  }
+
   var api = {
+    parsePriceBR: parsePriceBR, parseLigaPrices: parseLigaPrices,
     edsSum: edsSum, edsMerge: edsMerge, edsTake: edsTake, edsPop: edsPop,
     splitSource: splitSource, markOwned: markOwned,
     consensus: consensus, buildIndex: buildIndex, matchName: matchName, resolveName: resolveName, cleanOcr: cleanOcr, norm: norm,
