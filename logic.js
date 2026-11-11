@@ -16,7 +16,7 @@
 
   /* Lê listas em texto: "4 Counterspell", "4x Counterspell",
      "4 Counterspell (TMP) 57 *F*", seções Deck/Sideboard/Commander/Maybeboard. */
-  function parseList(text) {
+  function parseList(text, keepLines) {
     var lines = String(text || '').replace(/\r/g, '').split('\n');
     var board = 'main';
     var out = [];
@@ -45,7 +45,13 @@
       var m = line.match(/^(\d+)\s*[xX]?\s+(.+)$/);
       if (!m) { skipped.push(raw.trim()); return; }
       var qty = parseInt(m[1], 10);
-      var name = m[2]
+      var rest = m[2];
+      var unsure = /\?+\s*$/.test(rest);
+      if (unsure) rest = rest.replace(/\s*\?+\s*$/, '');
+      var foil = /\*F\*/i.test(rest);
+      var em = rest.replace(/\s+\*[A-Za-z]+\*.*$/, '').match(/\s+\(([A-Za-z0-9]{2,6})\)(?:\s+([\w★†-]+))?\s*$/);
+      var line1 = { n: qty, set: em ? em[1].toLowerCase() : '', num: em && em[2] ? em[2] : '', foil: foil, unsure: unsure };
+      var name = rest
         .replace(/\s+\*[A-Z]+\*.*$/, '')           // *F*, *E*
         .replace(/\s+\([A-Za-z0-9]{2,6}\)(\s+[\w★-]+)?\s*$/, '') // (SET) 123
         .replace(/\s+#.*$/, '')
@@ -59,8 +65,9 @@
       if (b === 'maybe') return;
 
       var k = b + '|' + key(name);
-      if (lineMap[k]) { lineMap[k].qty += qty; return; }
+      if (lineMap[k]) { lineMap[k].qty += qty; if (keepLines) lineMap[k].lines.push(line1); return; }
       var card = { name: name, qty: qty, board: b, owned: 0 };
+      if (keepLines) card.lines = [line1];
       lineMap[k] = card;
       out.push(card);
     });
@@ -184,11 +191,13 @@
 
   /* Troca a lista mantendo o que eu já marquei como "tenho". */
   function mergeOwned(oldCards, newCards) {
-    var prev = {};
-    oldCards.forEach(function (c) { prev[c.board + '|' + key(c.name)] = c.owned || 0; });
+    var prev = {}, prevEds = {};
+    oldCards.forEach(function (c) { prev[c.board + '|' + key(c.name)] = c.owned || 0; prevEds[c.board + '|' + key(c.name)] = c.eds; });
     newCards.forEach(function (c) {
       var o = prev[c.board + '|' + key(c.name)];
       c.owned = o ? Math.min(o, c.qty) : 0;
+      var pe = prevEds[c.board + '|' + key(c.name)];
+      if (pe && c.owned) c.eds = edsTake(pe, c.owned).taken;
     });
     return newCards;
   }
@@ -341,7 +350,37 @@
     return { changed: changed, notFound: Object.keys(names).filter(function (k) { return !hit[k]; }).map(function (k) { return names[k]; }) };
   }
 
+  /* ---------- edição por cópia ----------
+     eds = lista de { set, num, n }: as edições das cópias que a pessoa tem (soma <= quantidade que tem).
+     Cópias sem edição conhecida ficam "no fim": ao tirar cópias, saem primeiro. */
+  function edsSum(eds) { return (eds || []).reduce(function (a, e) { return a + (e.n || 0); }, 0); }
+  function edsMerge(a, b) {
+    var out = (a || []).map(function (e) { return { set: e.set, num: e.num, n: e.n }; });
+    (b || []).forEach(function (e) {
+      var f = out.filter(function (x) { return x.set === e.set && x.num === e.num; })[0];
+      if (f) f.n += e.n; else out.push({ set: e.set, num: e.num, n: e.n });
+    });
+    return out;
+  }
+  function edsTake(eds, n) {
+    var taken = [], rest = [], left = Math.max(0, n);
+    (eds || []).forEach(function (e) {
+      var t = Math.min(e.n, left);
+      if (t > 0) taken.push({ set: e.set, num: e.num, n: t });
+      if (e.n > t) rest.push({ set: e.set, num: e.num, n: e.n - t });
+      left -= t;
+    });
+    return { taken: taken, rest: rest };
+  }
+  function edsPop(eds, total, n) {
+    var known = edsSum(eds), unknown = Math.max(0, total - known);
+    var pop = Math.min(known, Math.max(0, n - unknown));
+    var r = edsTake(eds, known - pop);
+    return { kept: r.taken, removed: r.rest };
+  }
+
   var api = {
+    edsSum: edsSum, edsMerge: edsMerge, edsTake: edsTake, edsPop: edsPop,
     splitSource: splitSource, markOwned: markOwned,
     consensus: consensus, buildIndex: buildIndex, matchName: matchName, resolveName: resolveName, cleanOcr: cleanOcr, norm: norm,
     typeGroup: typeGroup, GROUP_ORDER: GROUP_ORDER, parseMana: parseMana, toText: toText, mergeOwned: mergeOwned,

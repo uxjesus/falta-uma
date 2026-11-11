@@ -117,7 +117,7 @@
     if (el.hasAttribute('data-sym')) {
       var s = document.createElement('span'); s.className = 't'; s.textContent = el.getAttribute('data-sym');
       el.replaceWith(s);
-    } else if (el.classList.contains('thumb') || el.classList.contains('art') || el.classList.contains('cardimg') || el.closest('.gcard')) {
+    } else if (el.classList.contains('thumb') || el.classList.contains('art') || el.classList.contains('cardimg') || el.closest('.gcard') || el.closest('.cp') || el.closest('.edline')) {
       el.style.visibility = 'hidden';
     }
   }, true);
@@ -324,38 +324,41 @@
     if (el) el.focus({ preventScroll: true });
   });
 
-  /* Cartas marcadas como "tenho" que saíram dos decks: ficam guardadas (ajudam na troca com amigos). */
+  /* Cartas marcadas como "tenho" que não estão em nenhum deck: ficam na Coleção (e ajudam na troca com amigos).
+     Cada entrada guarda as edições das cópias (eds), quando conhecidas. */
   function spareMap() { state.spare = state.spare || {}; return state.spare; }
-  function putSpare(name, n) {
+  function putSpare(name, n, eds) {
     if (!(n > 0)) return;
-    var s = spareMap(), nm = canonical(name), k = FU.key(nm);
-    s[k] = { name: nm, qty: Math.min(999, ((s[k] && s[k].qty) || 0) + n) };
+    var s = spareMap(), nm = canonical(name), k = FU.key(nm), prev = s[k];
+    s[k] = { name: nm, qty: Math.min(999, ((prev && prev.qty) || 0) + n), eds: FU.edsMerge(prev && prev.eds, FU.edsTake(eds, n).taken) };
   }
-  function takeSpare(name, want) {
+  function takeSpareEds(name, want) {
     var s = spareMap(), k = FU.key(canonical(name));
-    if (!s[k] || !(want > 0)) return 0;
+    if (!s[k] || !(want > 0)) return { n: 0, eds: [] };
     var got = Math.min(want, s[k].qty);
-    s[k].qty -= got;
+    var pop = FU.edsPop(s[k].eds, s[k].qty, got);
+    s[k].qty -= got; s[k].eds = pop.kept;
     if (s[k].qty <= 0) delete s[k];
-    return got;
+    return { n: got, eds: pop.removed };
   }
+  function takeSpare(name, want) { return takeSpareEds(name, want).n; }
   function spareQty(name) { var s = spareMap()[FU.key(canonical(name))]; return s ? s.qty : 0; }
   function decksWithSpare() {
     var s = spareMap();
     var cards = Object.keys(s).map(function (k) { return { name: s[k].name, qty: s[k].qty, owned: s[k].qty, board: 'main' }; });
-    return cards.length ? state.decks.concat([{ id: 'spare', name: 'Guardadas', cards: cards }]) : state.decks;
+    return cards.length ? state.decks.concat([{ id: 'spare', name: 'Coleção', cards: cards }]) : state.decks;
   }
   function removeCard(d, i) {
     var c = d.cards[i];
     if (!c) return;
-    putSpare(c.name, c.owned || 0);
+    putSpare(c.name, c.owned || 0, c.eds);
     d.cards.splice(i, 1);
     if (d.cover && FU.key(d.cover) === FU.key(canonical(c.name)) && !d.cards.some(function (x) { return FU.key(canonical(x.name)) === FU.key(d.cover); })) d.cover = null;
   }
   function setQty(c, q) {
     q = Math.max(1, Math.min(99, q));
-    if (q < (c.owned || 0)) { putSpare(c.name, c.owned - q); c.owned = q; }
-    if (q > c.qty && (c.owned || 0) < q) c.owned = (c.owned || 0) + takeSpare(c.name, q - (c.owned || 0));
+    if (q < (c.owned || 0)) { var pp = FU.edsPop(c.eds, c.owned, c.owned - q); putSpare(c.name, c.owned - q, pp.removed); c.eds = pp.kept; c.owned = q; }
+    if (q > c.qty && (c.owned || 0) < q) { var tk = takeSpareEds(c.name, q - (c.owned || 0)); c.owned = (c.owned || 0) + tk.n; c.eds = FU.edsMerge(c.eds, tk.eds); }
     c.qty = q;
   }
   function moveBoard(d, i) {
@@ -363,8 +366,30 @@
     if (!c) return;
     var to = c.board === 'side' ? 'main' : 'side';
     var ex = d.cards.filter(function (x) { return x !== c && x.board === to && FU.key(canonical(x.name)) === FU.key(canonical(c.name)); })[0];
-    if (ex) { ex.qty = Math.min(99, ex.qty + c.qty); ex.owned = Math.min(ex.qty, (ex.owned || 0) + (c.owned || 0)); d.cards.splice(i, 1); }
+    if (ex) { ex.qty = Math.min(99, ex.qty + c.qty); ex.owned = Math.min(ex.qty, (ex.owned || 0) + (c.owned || 0)); ex.eds = FU.edsMerge(ex.eds, c.eds); d.cards.splice(i, 1); }
     else c.board = to;
+  }
+
+  /* ---------- edições das cópias que a pessoa tem ---------- */
+  function edsFor(nm) {
+    var out = [], total = 0;
+    ownedLines(nm).forEach(function (l) { var o = l.c.owned || 0; total += o; out = FU.edsMerge(out, FU.edsTake(l.c.eds, o).taken); });
+    var s = spareMap()[FU.key(nm)];
+    if (s) { total += s.qty; out = FU.edsMerge(out, FU.edsTake(s.eds, s.qty).taken); }
+    return { eds: out, total: total };
+  }
+  function prInfo(e) { return (db.pr || {})[e.set + '/' + e.num] || null; }
+  function edLabel(e) { var p = prInfo(e); return (p && p.setName ? p.setName : String(e.set).toUpperCase()) + ' #' + e.num; }
+  function edsShort(eds) { return eds.map(function (e) { return String(e.set).toUpperCase() + (e.n > 1 ? '×' + e.n : ''); }).join(', '); }
+  function copiesHtml(nm) {
+    var r = edsFor(nm), known = FU.edsSum(r.eds);
+    if (!known) return '';
+    var unk = r.total - known;
+    return '<div class="dlg-sec"><h3>Suas cópias</h3><ul class="copies">' + r.eds.map(function (e) {
+      var p = prInfo(e);
+      return '<li><span class="cp">' + (p && p.sm ? '<img src="' + esc(p.sm) + '" alt="" width="72" height="100" loading="lazy">' : '<span class="cph" aria-hidden="true">' + esc(String(e.set).toUpperCase()) + '</span>') + '</span>' +
+        '<span class="cl"><strong>×' + e.n + '</strong> ' + esc(edLabel(e)) + (p && p.year ? ' · ' + esc(p.year) : '') + '</span></li>';
+    }).join('') + (unk > 0 ? '<li><span class="cl"><strong>×' + unk + '</strong> <span class="muted">edição não informada</span></span></li>' : '') + '</ul></div>';
   }
 
   function ownedLines(nm) {
@@ -400,7 +425,7 @@
   function spareHtml(nm) {
     var n = spareQty(nm);
     if (!n) return '';
-    return '<div class="dlg-sec"><h3>Guardadas</h3><p class="small">Você marcou que tem <strong>' + n + '</strong> fora dos decks. Elas contam na troca com amigos e voltam sozinhas se a carta entrar num deck.</p>' +
+    return '<div class="dlg-sec"><h3>Na coleção, fora dos decks</h3><p class="small">Você tem <strong>' + n + '</strong> fora dos decks. Elas contam na troca com amigos e voltam sozinhas se a carta entrar num deck.</p>' +
       '<button class="link" data-spareclear>Não tenho mais</button></div>';
   }
   function addToHtml(nm) {
@@ -452,7 +477,7 @@
       (info && info.scryfall ? '<a class="btn" href="' + esc(info.scryfall) + '" target="_blank" rel="noopener">Regras</a>' : '') +
       (info && info.gatherer ? '<a class="btn" href="' + esc(info.gatherer) + '" target="_blank" rel="noopener">Gatherer</a>' : '') +
       '</div></div>' + noteForm + '</div>' +
-      ownHtml(nm) + addToHtml(nm) + spareHtml(nm) + coverHtml(nm) +
+      copiesHtml(nm) + ownHtml(nm) + addToHtml(nm) + spareHtml(nm) + coverHtml(nm) +
       '<div id="rulings" class="rulings"></div>';
     document.getElementById('dlgClose').addEventListener('click', function () { dlg.close(); });
     dlgBody.querySelectorAll('[data-close]').forEach(function (a) { a.addEventListener('click', function () { lastFocus = null; dlg.close(); }); });
@@ -546,7 +571,9 @@
     var d = deckById(t.getAttribute('data-d'));
     var c = d && d.cards[+t.getAttribute('data-i')];
     if (!c) return;
+    var oldO = c.owned;
     c.owned = Math.max(0, Math.min(c.qty, c.owned + (+t.getAttribute('data-mown'))));
+    if (c.owned < oldO) c.eds = FU.edsPop(c.eds, oldO, oldO - c.owned).kept;
     persist(true);
     var sel = '[data-mown="' + t.getAttribute('data-mown') + '"][data-d="' + t.getAttribute('data-d') + '"][data-i="' + t.getAttribute('data-i') + '"]';
     openCard(openName);
@@ -764,7 +791,7 @@
     });
     html += '</ul>';
     });
-    return html + '<div style="padding:4px 16px 16px"><a class="btn full" href="#/novo/lista">' + ICON.plus + 'Nova lista de cartas avulsas</a></div>';
+    return html + '<div style="padding:4px 16px 16px"><a class="btn full" href="#/novo/lista">' + ICON.plus + 'Nova lista de cartas avulsas</a><button class="btn full" data-photo="novo" style="margin-top:8px">' + ICO.cam + 'Importar deck por foto</button></div>';
   }
 
   function ownBtn(c, idx) {
@@ -851,6 +878,8 @@
         var inF = state.decks.filter(function (d) { return !ui.fmt || ui.fmt === 'all' || fmtOf(d) === ui.fmt; });
         if (inF.length > 1) html += segRow('Deck', 'deck', [['all', ui.fmt && ui.fmt !== 'all' ? 'Todos de ' + ui.fmt : 'Todos']].concat(inF.map(function (d) { return [d.id, d.name]; })), ui.deck || 'all');
         html += segRow('Ver como', 'fview', [['grid', 'Imagens'], ['list', 'Lista']], ui.fview === 'list' ? 'list' : 'grid');
+      } else if (ctx === 'colecao') {
+        html += segRow('Ver como', 'dview', [['grid', 'Imagens'], ['list', 'Lista']], ui.view.colecao === 'list' ? 'list' : 'grid');
       } else {
         var v = ui.view[ctx] === 'list' ? 'list' : 'grid';
         html += segRow('Ver como', 'dview', [['grid', 'Imagens'], ['list', 'Lista']], v);
@@ -1045,6 +1074,7 @@
     html += toolsBar([
       toolBtn('data-sheet="export" data-ctx="' + esc(d.id) + '"', ICO.exp, 'Exportar'),
       toolBtn('data-sheet="owned" data-ctx="' + esc(d.id) + '"', svg('<path d="M9 11l3 3 8-8"/><path d="M20 12v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h11"/>'), 'Marcar o que eu tenho colando uma lista'),
+      toolBtn('data-photo="' + esc(d.id) + '"', ICO.cam, 'Importar por foto'),
       toolBtn('data-buy="' + esc(d.id) + '"' + (miss ? '' : ' disabled'), svg('<path d="M6 6h15l-1.5 9h-12z"/><path d="M6 6 5 3H2"/><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/>'), 'Comprar: copiar o que falta para a Liga Magic')
     ], d.id, '<a class="ib" href="#/editar/' + esc(d.id) + '" aria-label="Editar deck" title="Editar deck" style="color:var(--accent)">' + ICON.edit + '</a>');
     if (onlyMiss) html += '<p class="chipline"><span>Mostrando só o que falta</span><button class="link" data-clearmiss>Mostrar todas</button></p>';
@@ -1083,12 +1113,15 @@
     }
     return d;
   }
-  /* Campo "Adicionar carta": no fim de cada deck/lista e no fim da tela inicial (vai para Soltas). */
-  function addCardHtml(d, loose) {
-    var help = loose
+  /* Campo "Adicionar carta": no fim de cada deck/lista, da tela inicial (vai para Soltas) e da Coleção. */
+  function addCardHtml(d, mode) {
+    var kind = mode === true ? 'soltas' : mode;
+    var title = kind === 'soltas' ? 'Adicionar carta solta' : (kind === 'colecao' ? 'Adicionar à coleção' : 'Adicionar carta');
+    var help = kind === 'soltas'
       ? 'A carta vai para a lista “Soltas” e entra em “O que falta”. Depois você pode movê-la para um deck.'
-      : 'Entra 1 cópia no principal. Depois toque na carta para ajustar.';
-    return '<section class="sec addcard" aria-labelledby="acL"><h2 class="sec-h" id="acL">' + (loose ? 'Adicionar carta solta' : 'Adicionar carta') + '</h2><div class="form" style="padding-top:8px;gap:8px">' +
+      : (kind === 'colecao' ? 'Marca 1 cópia como sua, fora de qualquer deck. Para várias de uma vez, importe uma foto.'
+        : 'Entra 1 cópia no principal. Depois toque na carta para ajustar.');
+    return '<section class="sec addcard" aria-labelledby="acL"><h2 class="sec-h" id="acL">' + title + '</h2><div class="form" style="padding-top:8px;gap:8px">' +
       '<label for="acIn" class="visually-hidden">Nome da carta</label>' +
       '<div class="acrow"><input type="text" id="acIn" data-acdeck="' + esc(d.id) + '" autocomplete="off" spellcheck="false" autocapitalize="off" enterkeyhint="search" placeholder="Nome da carta (inglês ou português)" aria-describedby="acHelp" aria-controls="acList">' +
       '<button type="button" class="btn primary" data-acgo>' + ICON.plus + 'Adicionar</button></div>' +
@@ -1172,6 +1205,17 @@
     var inp = document.getElementById('acIn');
     if (!inp || !name) return;
     var did = inp.getAttribute('data-acdeck');
+    if (did === 'colecao') {
+      var cn = canonical(name);
+      putSpare(cn, 1, []);
+      persist(true);
+      var yc = window.scrollY; render(); window.scrollTo(0, yc);
+      var ac2 = document.getElementById('acIn'); if (ac2) ac2.focus({ preventScroll: true });
+      toast('Na coleção: ' + cn + ' (' + spareQty(cn) + ' fora dos decks).');
+      var ci = cardInfo(cn);
+      if (!ci || !ci.typeLine) refreshPrices({ only: [cn], silent: true });
+      return;
+    }
     var loose = did === SOLTAS_ID;
     var d = loose ? soltasDeck(true) : deckById(did);
     if (!d) return;
@@ -1515,8 +1559,276 @@
     var nm = canonical(name);
     var ex = d.cards.filter(function (c) { return c.board === board && FU.key(canonical(c.name)) === FU.key(nm); })[0];
     if (ex) ex.qty = Math.max(ex.qty, qty);
-    else d.cards.push({ name: nm, qty: qty, board: board === 'commander' ? 'commander' : (board === 'side' ? 'side' : 'main'), owned: takeSpare(nm, qty) });
+    else { var tk = takeSpareEds(nm, qty); d.cards.push({ name: nm, qty: qty, board: board === 'commander' ? 'commander' : (board === 'side' ? 'side' : 'main'), owned: tk.n, eds: tk.eds }); }
   }
+
+  /* ---------- Coleção: tudo que a pessoa tem, com o que está fora dos decks em primeiro lugar ---------- */
+  function collectionData() {
+    var map = {};
+    function row(nm) { var k = FU.key(nm); return map[k] || (map[k] = { name: nm, decks: [], spare: 0, total: 0, eds: [] }); }
+    state.decks.forEach(function (d) {
+      d.cards.forEach(function (c) {
+        if (!(c.owned > 0)) return;
+        var nm = canonical(c.name);
+        if (FU.isBasic(nm)) return;
+        var r = row(nm), ex = r.decks.filter(function (x) { return x.id === d.id; })[0];
+        if (ex) ex.n += c.owned; else r.decks.push({ id: d.id, name: d.name, n: c.owned });
+        r.total += c.owned;
+        r.eds = FU.edsMerge(r.eds, FU.edsTake(c.eds, c.owned).taken);
+      });
+    });
+    var s = spareMap();
+    Object.keys(s).forEach(function (k) {
+      var r = row(s[k].name);
+      r.spare += s[k].qty; r.total += s[k].qty;
+      r.eds = FU.edsMerge(r.eds, FU.edsTake(s[k].eds, s[k].qty).taken);
+    });
+    return Object.keys(map).map(function (k) { return map[k]; });
+  }
+  function viewColecao() {
+    fab.innerHTML = ''; barAction.innerHTML = '';
+    var ui = state.ui, tab = ui.colTab === 'all' ? 'all' : 'out';
+    var all = collectionData(), outN = 0, allN = 0;
+    all.forEach(function (r) { outN += r.spare; allN += r.total; });
+    var cnt = function (r) { return tab === 'all' ? r.total : r.spare; };
+    var items = all.filter(function (r) { return cnt(r) > 0; });
+    var html = '<header class="head"><h1>Coleção</h1><p class="metaline">' + allN + (allN === 1 ? ' carta' : ' cartas') + ' que você tem · ' + outN + ' fora dos decks</p></header>' +
+      '<div class="tabsbar" role="tablist" aria-label="Coleção">' +
+      '<button role="tab" data-ctab="out" aria-selected="' + (tab === 'out') + '">Fora dos decks (' + outN + ')</button>' +
+      '<button role="tab" data-ctab="all" aria-selected="' + (tab === 'all') + '">Tudo que tenho (' + allN + ')</button></div>' +
+      toolsBar([toolBtn('data-photo="colecao"', ICO.cam, 'Importar por foto')], 'colecao');
+    if (!items.length) {
+      html += '<div class="card pad stack" style="margin:16px"><p><strong>' + (tab === 'out' ? 'Nada guardado fora dos decks.' : 'Você ainda não marcou nenhuma carta.') + '</strong></p>' +
+        '<p class="muted small">As cartas que você tem e não estão em nenhum deck ficam aqui. Adicione uma por vez abaixo ou importe uma foto.</p>' +
+        '<button class="btn primary full" data-photo="colecao">' + ICO.cam + 'Importar por foto</button></div>';
+    } else {
+      var grid = ui.view.colecao !== 'list';
+      groupByType(items, function (r) { return r.name; }).forEach(function (g) {
+        sortItems(g.items, function (r) { return r.name; }, cnt);
+        var n = g.items.reduce(function (a, r) { return a + cnt(r); }, 0), key = 'c:' + g.title;
+        html += '<section class="sec">' + secHead(key, g.title, n);
+        if (!isClosed(key)) {
+          html += grid ? '<ul class="grid">' + g.items.map(function (r) {
+            var info = cardInfo(r.name), pr = moneyShort(info, cnt(r));
+            return '<li><button class="gc" data-card="' + esc(r.name) + '" aria-label="Você tem ' + cnt(r) + ' ' + esc(r.name) + (r.eds.length ? ', edições ' + esc(edsShort(r.eds)) : '') + '">' +
+              (imgOf(info) ? '<img src="' + esc(imgOf(info)) + '" alt="" loading="lazy" decoding="async" width="488" height="680">' : '<span class="ph" style="' + phStyle(info) + '">' + esc(r.name) + '</span>') +
+              '<span class="cap" aria-hidden="true"><span>×' + cnt(r) + '</span><span>' + (r.eds.length ? esc(edsShort(r.eds)) : (pr || '')) + '</span></span></button></li>';
+          }).join('') + '</ul>' : '<ul class="rows">' + g.items.map(function (r) {
+            var info = cardInfo(r.name), parts = [];
+            if (tab === 'all') { r.decks.forEach(function (d) { parts.push(d.name + ' ' + d.n); }); if (r.spare) parts.push('fora dos decks ' + r.spare); }
+            if (r.eds.length) parts.push(edsShort(r.eds));
+            return '<li class="r"><span class="q" aria-label="você tem ' + cnt(r) + '">' + cnt(r) + '</span>' +
+              '<button class="nm" data-card="' + esc(r.name) + '">' + esc(r.name) + (parts.length ? '<span class="d">' + esc(parts.join(' · ')) + '</span>' : '') + '</button>' +
+              manaHtml(info && info.manaCost) + priceCell(info, cnt(r)) + '</li>';
+          }).join('') + '</ul>';
+        }
+        html += '</section>';
+      });
+    }
+    return html + addCardHtml({ id: 'colecao' }, 'colecao') + '<p class="foot">Terrenos básicos não entram. Marque “tenho” nos decks ou importe uma foto e as cartas aparecem aqui.</p>';
+  }
+
+  /* ---------- importar por foto: a IA da pessoa lê a foto, o app lê a resposta ---------- */
+  ICO.cam = svg('<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>');
+  var photo = null;
+  var AIS = [['claude', 'Claude', 'https://claude.ai/new?q='], ['chatgpt', 'ChatGPT', 'https://chatgpt.com/?q='], ['gemini', 'Gemini', 'https://gemini.google.com/app']];
+  function photoPrompt() {
+    return [
+      'Vou te enviar foto(s) de cartas de Magic: The Gathering.',
+      'Para cada carta, leia: o nome em inglês, o código da edição (3 a 5 letras, no rodapé da carta, ex.: TMP, 2XM, MH3) e o número de colecionador (ao lado do código, ex.: 123).',
+      'Responda SOMENTE com a lista, uma carta por linha, neste formato exato:',
+      '1 Nome da Carta (EDIT) 123',
+      'Regras: se a mesma carta aparecer em edições diferentes, use uma linha para cada edição. Se a foto mostrar um deck com sideboard, escreva uma linha só com a palavra Sideboard antes das cartas do sideboard. Se não tiver certeza do nome, da edição ou do número, escreva o que conseguir e coloque ? no fim da linha. Se a carta for foil, acrescente *F* no fim da linha. Não escreva títulos, explicações nem comentários.',
+      'Coloque a lista inteira dentro de um único bloco de código, para eu copiar com um toque.',
+      'Agora vou enviar as fotos.'
+    ].join('\n\n');
+  }
+  function newPhoto(id) {
+    return { id: id, step: 'input', target: id === 'colecao' ? 'colecao' : (id && id !== 'novo' && deckById(id) ? id : 'novo'), name: '', format: 'Premodern', text: '', rows: null, busy: '', err: '' };
+  }
+  function readPhotoInputs() {
+    if (!photo) return;
+    var t = document.getElementById('ptarget'); if (t) photo.target = t.value;
+    var n = document.getElementById('pname'); if (n) photo.name = n.value;
+    var f = document.getElementById('pfmt'); if (f) photo.format = f.value;
+    var x = document.getElementById('ptext'); if (x) photo.text = x.value;
+  }
+  function readPhotoReview() {
+    if (!photo || !photo.rows) return;
+    photo.rows.forEach(function (r, i) {
+      var q = document.getElementById('pq' + i), n = document.getElementById('pn' + i);
+      if (q) r.qty = Math.max(0, Math.min(99, parseInt(q.value, 10) || 0));
+      if (n && n.value.trim() !== r.name) { r.name = n.value.trim(); r.status = 'ok'; }
+    });
+  }
+  function viewFoto(id) {
+    barAction.innerHTML = ''; fab.innerHTML = '';
+    if (!photo || photo.id !== id) photo = newPhoto(id);
+    var back = id === 'colecao' ? '#/colecao' : (id && id !== 'novo' && deckById(id) ? '#/deck/' + esc(id) : '#/decks');
+    var html = '<header class="head"><a href="' + back + '" class="link" style="margin-left:-4px" data-dropphoto>' + ICON.back + 'Voltar</a><h1>Importar por foto</h1></header>';
+    if (photo.step === 'review') return html + photoReviewHtml();
+    var fmts = ['Premodern', 'Commander', 'Pauper', 'Legacy', 'Modern', 'Outro'];
+    var opts = '<option value="novo"' + (photo.target === 'novo' ? ' selected' : '') + '>Novo deck</option>' +
+      state.decks.map(function (d) { return '<option value="' + esc(d.id) + '"' + (photo.target === d.id ? ' selected' : '') + '>' + esc(d.name) + (d.format === 'Lista' ? ' (lista)' : '') + '</option>'; }).join('') +
+      '<option value="colecao"' + (photo.target === 'colecao' ? ' selected' : '') + '>Só na coleção (sem deck)</option>';
+    html += '<div class="form pphoto">' +
+      '<section aria-labelledby="p1"><h2 id="p1" class="ph-h"><span aria-hidden="true">1</span>Para onde vai?</h2>' +
+      '<label for="ptarget" class="visually-hidden">Destino</label><select id="ptarget" class="field">' + opts + '</select>' +
+      (photo.target === 'novo' ? '<div style="display:grid;gap:8px;margin-top:8px"><label for="pname" class="visually-hidden">Nome do deck</label><input type="text" id="pname" autocomplete="off" placeholder="Nome do deck, ex.: UW Control" value="' + esc(photo.name) + '">' +
+        '<label for="pfmt" class="visually-hidden">Formato</label><select id="pfmt" class="field">' + fmts.map(function (f) { return '<option' + (photo.format === f ? ' selected' : '') + '>' + f + '</option>'; }).join('') + '</select></div>' : '') +
+      '<p class="xs muted" style="margin-top:8px">As cartas entram marcadas como “tenho”. ' + (photo.target === 'colecao' ? 'Ficam na Coleção, fora de qualquer deck.' : 'Se a foto tiver mais cópias do que o deck pede, as que sobram vão para a Coleção.') + '</p></section>' +
+      '<section aria-labelledby="p2"><h2 id="p2" class="ph-h"><span aria-hidden="true">2</span>Peça a lista para a sua IA</h2>' +
+      '<p class="small muted">Eu copio um prompt pronto. Abra a IA que você usa, cole o prompt e mande a foto do deck ou das cartas na mesma conversa.</p>' +
+      '<button type="button" class="btn primary full" data-pcopy style="margin-top:8px">' + ICON.copy + 'Copiar prompt</button>' +
+      '<div class="aibtns">' + AIS.map(function (a) { return '<button type="button" class="btn" data-pai="' + a[0] + '">Copiar e abrir ' + a[1] + '</button>'; }).join('') + '</div>' +
+      '<p class="xs muted" style="margin-top:8px">Funciona com qualquer IA que aceite foto. Se a IA abrir sem o prompt preenchido, é só colar.</p></section>' +
+      '<section aria-labelledby="p3"><h2 id="p3" class="ph-h"><span aria-hidden="true">3</span>Cole a resposta aqui</h2>' +
+      '<p class="small muted">Na IA, toque em copiar na lista que ela devolveu e volte aqui.</p>' +
+      '<label for="ptext" class="visually-hidden">Resposta da IA</label><textarea id="ptext" spellcheck="false" autocapitalize="off" placeholder="1 Swords to Plowshares (TMP) 123&#10;2 Counterspell (7ED) 67" style="margin-top:8px">' + esc(photo.text) + '</textarea>' +
+      '<p id="pErr" class="err" role="alert" style="margin-top:8px">' + esc(photo.err) + '</p>' +
+      (photo.busy ? '<p class="small" role="status" aria-live="polite"><strong>' + esc(photo.busy) + '</strong></p>' : '') +
+      '<button type="button" class="btn primary full" data-pread style="margin-top:8px">Ler lista</button></section></div>';
+    return html;
+  }
+  function photoReviewHtml() {
+    var rows = photo.rows;
+    var sum = rows.reduce(function (a, r) { return a + (r.qty || 0); }, 0);
+    var check = rows.filter(function (r) { return r.status !== 'ok' || r.unsure || r.edStatus === 'bad' || r.edStatus === 'fixed'; }).length;
+    var dk = photo.target === 'novo' ? null : deckById(photo.target);
+    var to = photo.target === 'novo' ? 'o novo deck “' + esc(photo.name.trim()) + '”' : (photo.target === 'colecao' ? 'a coleção' : esc(dk ? dk.name : 'o deck'));
+    var html = '<div class="form" style="gap:8px"><p class="small">Li <strong>' + sum + (sum === 1 ? ' carta' : ' cartas') + '</strong> para ' + to + '. Todas entram como “tenho”.' +
+      (check ? ' Confira as <strong>' + check + '</strong> marcadas.' : ' Nomes e edições conferem.') + '</p>' +
+      (photo.catalogMissing ? '<p class="xs muted">Não consegui baixar a lista oficial de nomes agora, então só comparei com as cartas que o app já conhece.</p>' : '') + '</div><ul class="rows" id="revList">';
+    rows.forEach(function (r, i) {
+      var flags = [];
+      if (r.status === 'fixed') flags.push('nome corrigido (li “' + esc(r.raw) + '”)'); else if (r.status === 'unknown') flags.push('não reconheci o nome');
+      if (r.unsure) flags.push('a IA não teve certeza');
+      var ed, p = r.info;
+      if (r.edStatus === 'none') ed = '<span class="xs muted">Sem edição informada</span>';
+      else if (r.edStatus === 'bad') ed = '<span class="xs" style="color:var(--miss)">Edição ' + esc(String(r.set).toUpperCase()) + (r.num ? ' #' + esc(r.num) : '') + ' não confere com esta carta. Entra sem edição.</span>';
+      else ed = (p && p.sm ? '<img src="' + esc(p.sm) + '" alt="" width="56" height="78" loading="lazy">' : '') + '<span class="xs">' + esc(p && p.setName ? p.setName : String(r.set).toUpperCase()) + (r.num ? ' · #' + esc(r.num) : '') + (p && p.year ? ' · ' + esc(p.year) : '') +
+        (r.foil ? ' · foil' : '') + (r.edStatus === 'fixed' ? ' · número corrigido' : '') + (r.edStatus === 'offline' ? ' · sem internet, não conferi' : '') + '</span>';
+      html += '<li class="r rev" style="grid-template-columns:64px minmax(0,1fr) auto">' +
+        '<label class="visually-hidden" for="pq' + i + '">Quantidade</label><input id="pq' + i + '" type="text" inputmode="numeric" value="' + r.qty + '" style="width:56px;text-align:center;padding:8px 4px">' +
+        '<div style="min-width:0"><label class="visually-hidden" for="pn' + i + '">Nome da carta</label><input id="pn' + i + '" type="text" autocomplete="off" spellcheck="false" value="' + esc(r.name) + '">' +
+        (flags.length ? '<p class="xs" style="margin-top:4px;color:var(--miss);font-weight:700">' + flags.join(' · ') + '</p>' : '') +
+        (r.board === 'side' ? '<p class="xs muted" style="margin-top:2px">sideboard</p>' : '') + '<div class="edline">' + ed + '</div></div>' +
+        '<button class="ib" data-pdel="' + i + '" aria-label="Remover ' + esc(r.name) + '">' + svg('<path d="M6 6l12 12M18 6 6 18"/>') + '</button></li>';
+    });
+    return html + '</ul><div class="form"><button class="btn primary full" data-psave>Salvar (' + sum + (sum === 1 ? ' carta)' : ' cartas)') + '</button><button class="btn full" data-pback>Voltar</button></div>';
+  }
+  function buildPhotoRows(cards, idx) {
+    var rows = [];
+    cards.forEach(function (c) {
+      var res = FU.resolveName(c.name, idx);
+      (c.lines || [{ n: c.qty }]).forEach(function (l) {
+        rows.push({ qty: l.n, name: res.name, raw: c.name, status: res.status, board: c.board, set: l.set || '', num: l.num || '', foil: !!l.foil, unsure: !!l.unsure, edStatus: l.set ? 'pending' : 'none', info: null });
+      });
+    });
+    return rows;
+  }
+  function postCollection(idents) {
+    var chunks = [], out = [], failed = false, p = Promise.resolve();
+    for (var i = 0; i < idents.length; i += 75) chunks.push(idents.slice(i, i + 75));
+    chunks.forEach(function (ch, idx) {
+      p = p.then(function () { return idx ? sleep(120) : null; }).then(function () {
+        return fetch(SCRY + '/cards/collection', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify({ identifiers: ch }) })
+          .then(function (r) { if (!r.ok) throw new Error('scry'); return r.json(); })
+          .then(function (j) { out = out.concat(j.data || []); })
+          .catch(function () { failed = true; });
+      });
+    });
+    return p.then(function () { return { cards: out, failed: failed }; });
+  }
+  function printInfo(c) {
+    var iu = c.image_uris || (c.card_faces && c.card_faces[0] && c.card_faces[0].image_uris) || {};
+    return { set: c.set, num: c.collector_number, setName: c.set_name, year: (c.released_at || '').slice(0, 4), sm: iu.small || null, img: iu.normal || null };
+  }
+  function sameFront(a, b) { return FU.norm(String(a).split(' // ')[0]) === FU.norm(String(b).split(' // ')[0]); }
+  /* Confere cada edição no Scryfall (set + número). Se o número não bate com a carta, tenta achar a edição pelo nome. */
+  function verifyPrints(rows) {
+    var withSet = rows.filter(function (r) { return r.set; });
+    if (!withSet.length) return Promise.resolve();
+    var offline = function () { withSet.forEach(function (r) { r.edStatus = 'offline'; }); };
+    if (!navigator.onLine) { offline(); return Promise.resolve(); }
+    var A = withSet.filter(function (r) { return r.num; });
+    return postCollection(A.map(function (r) { return { set: r.set, collector_number: String(r.num) }; })).then(function (res) {
+      if (res.failed) { offline(); return; }
+      var map = {};
+      res.cards.forEach(function (c) { map[c.set + '|' + String(c.collector_number).toLowerCase()] = c; });
+      var again = withSet.filter(function (r) { return !r.num; });
+      A.forEach(function (r) {
+        var c = map[r.set + '|' + String(r.num).toLowerCase()];
+        if (c && sameFront(c.name, r.name)) { r.edStatus = 'ok'; r.info = printInfo(c); r.num = c.collector_number; }
+        else again.push(r);
+      });
+      if (!again.length) return;
+      return postCollection(again.map(function (r) { return { name: String(r.name).split(' // ')[0], set: r.set }; })).then(function (r2) {
+        again.forEach(function (r) {
+          if (r2.failed) { r.edStatus = 'offline'; return; }
+          var c = r2.cards.filter(function (x) { return x.set === r.set && sameFront(x.name, r.name); })[0];
+          if (c) { r.edStatus = 'fixed'; r.info = printInfo(c); r.num = c.collector_number; } else r.edStatus = 'bad';
+        });
+      });
+    });
+  }
+  function photoRead() {
+    readPhotoInputs();
+    if (photo.target === 'novo' && !photo.name.trim()) { photo.err = 'Dê um nome ao deck.'; render(); keepFocus('#pname'); return; }
+    if (!photo.text.trim()) { photo.err = 'Cole aqui a resposta da IA.'; render(); keepFocus('#ptext'); return; }
+    var parsed = FU.parseList(photo.text, true);
+    if (!parsed.cards.length) { photo.err = 'Não achei cartas nessa resposta. Peça à IA para responder só com a lista, uma carta por linha, ex.: 1 Counterspell (TMP) 57.'; render(); keepFocus('#ptext'); return; }
+    photo.err = ''; photo.busy = 'Conferindo nomes e edições…'; render();
+    loadCatalog().then(function (idx) {
+      photo.catalogMissing = !idx;
+      photo.rows = buildPhotoRows(parsed.cards, idx || knownIndex());
+      return verifyPrints(photo.rows);
+    }).then(function () {
+      photo.busy = ''; photo.step = 'review'; render(); window.scrollTo(0, 0);
+    }).catch(function () {
+      photo.busy = ''; photo.err = 'Não consegui conferir agora. Tente de novo.'; render();
+    });
+  }
+  /* Foto vale como "tenho": só marca (nunca desmarca). O que passar da quantidade do deck vai para a Coleção. */
+  function photoSave() {
+    readPhotoReview();
+    var rows = photo.rows.filter(function (r) { return r.qty > 0 && r.name; });
+    if (!rows.length) { toast('Nenhuma carta para salvar.'); return; }
+    var toColl = photo.target === 'colecao', groups = {}, order = [];
+    rows.forEach(function (r) {
+      var nm = canonical(r.name), board = toColl ? 'main' : r.board, k = board + '|' + FU.key(nm);
+      if (!groups[k]) { groups[k] = { name: nm, board: board, qty: 0, eds: [] }; order.push(k); }
+      var g = groups[k]; g.qty += r.qty;
+      if (r.set && r.num && r.edStatus !== 'bad') {
+        g.eds = FU.edsMerge(g.eds, [{ set: r.set, num: String(r.num), n: r.qty }]);
+        if (r.info) { db.pr = db.pr || {}; db.pr[r.set + '/' + r.num] = r.info; }
+      }
+    });
+    var deck = null, created = false;
+    if (photo.target === 'novo') { deck = { id: newId(), name: photo.name.trim(), format: photo.format || 'Outro', cards: [], createdAt: Date.now() }; state.decks.push(deck); created = true; }
+    else if (!toColl) deck = deckById(photo.target);
+    if (!toColl && !deck) { toast('Deck não encontrado.'); return; }
+    var marked = 0, extra = 0;
+    order.forEach(function (k) {
+      var g = groups[k];
+      if (!deck) { putSpare(g.name, g.qty, g.eds); extra += g.qty; return; }
+      var c = deck.cards.filter(function (x) { return x.board === g.board && FU.key(canonical(x.name)) === FU.key(g.name); })[0] ||
+        deck.cards.filter(function (x) { return FU.key(canonical(x.name)) === FU.key(g.name); })[0];
+      if (!c) { deck.cards.push({ name: g.name, qty: g.qty, board: g.board, owned: g.qty, eds: g.eds }); marked += g.qty; return; }
+      var want = Math.min(g.qty, c.qty), before = c.owned || 0, tk = FU.edsTake(g.eds, want);
+      c.owned = Math.max(before, want);
+      c.eds = tk.taken;
+      marked += c.owned - before;
+      if (g.qty > want) { putSpare(g.name, g.qty - want, tk.rest); extra += g.qty - want; }
+    });
+    persist(true); persistDb();
+    var names = order.map(function (k) { return groups[k].name; }).filter(function (n) { var i = cardInfo(n); return !i || !i.typeLine; });
+    photo = null;
+    location.hash = deck ? '#/deck/' + deck.id : '#/colecao';
+    toast((created ? 'Deck criado. ' : '') + marked + (marked === 1 ? ' carta marcada' : ' cartas marcadas') + ' como “tenho”' + (extra ? ' · ' + extra + ' na Coleção' : '') + '.');
+    if (names.length) refreshPrices({ only: names, silent: true });
+  }
+
 
   /* ---------- roteamento ---------- */
   function route() {
@@ -1525,8 +1837,8 @@
   }
   function render() {
     var r = route();
-    var tab = ({ deck: 'decks', novo: 'decks', editar: 'decks', fonte: 'decks' })[r.name] || r.name;
-    document.body.classList.toggle('home', ['decks', 'deck', 'novo', 'editar', 'mais', 'fonte'].indexOf(r.name) === -1);
+    var tab = ({ deck: 'decks', novo: 'decks', editar: 'decks', fonte: 'decks', foto: r.id === 'colecao' ? 'colecao' : 'decks' })[r.name] || r.name;
+    document.body.classList.toggle('home', ['decks', 'deck', 'novo', 'editar', 'mais', 'fonte', 'colecao', 'foto'].indexOf(r.name) === -1);
     document.querySelectorAll('nav.tabs a').forEach(function (a) {
       if (a.getAttribute('data-tab') === tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     });
@@ -1534,7 +1846,7 @@
     var pip = mais.querySelector('.pip');
     if (needsBackup() && !pip) mais.insertAdjacentHTML('beforeend', '<span class="pip"></span><span class="visually-hidden"> (backup pendente)</span>');
     if (!needsBackup() && pip) { pip.nextElementSibling.remove(); pip.remove(); }
-    var titles = { falta: 'O que me falta', decks: 'Decks', mais: 'Mais', novo: 'Adicionar deck', editar: 'Editar deck', fonte: 'Adicionar fonte' };
+    var titles = { falta: 'O que me falta', decks: 'Decks', mais: 'Mais', novo: 'Adicionar deck', editar: 'Editar deck', fonte: 'Adicionar fonte', colecao: 'Coleção', foto: 'Importar por foto' };
     var d = r.name === 'deck' ? deckById(r.id) : null;
     document.title = (d ? d.name : (titles[r.name] || 'O que me falta')) + ' · Playset';
     if (r.name === 'decks') main.innerHTML = viewDecks();
@@ -1543,6 +1855,8 @@
     else if (r.name === 'editar') main.innerHTML = viewForm(r.id);
     else if (r.name === 'mais') main.innerHTML = viewMais();
     else if (r.name === 'fonte') main.innerHTML = viewFonte(r.id);
+    else if (r.name === 'colecao') main.innerHTML = viewColecao();
+    else if (r.name === 'foto') main.innerHTML = viewFoto(r.id);
     else main.innerHTML = viewFalta();
   }
   var lastRoute = null;
@@ -1573,6 +1887,7 @@
   });
 
   main.addEventListener('change', function (e) {
+    if (e.target.id === 'ptarget') { readPhotoInputs(); render(); keepFocus('#ptarget'); return; }
     if (e.target.id === 'si') { var f = e.target.files && e.target.files[0]; if (f) readImage(f); return; }
     if (e.target.hasAttribute('data-sortsel')) { state.ui.sort = e.target.value; persist(false); render(); keepFocus('#fSort'); return; }
     if (!e.target.hasAttribute('data-filter')) return;
@@ -1588,6 +1903,7 @@
 
   document.addEventListener('click', function (e) {
     if (e.target.closest('[data-dropdraft]')) draft = null;
+    if (e.target.closest('[data-dropphoto]')) photo = null;
     var aca = e.target.closest('[data-acadd]');
     if (aca && main.contains(aca)) { acAdd(aca.getAttribute('data-acadd')); return; }
     if (e.target.closest('[data-acgo]')) { acGo(); return; }
@@ -1656,6 +1972,20 @@
       return;
     }
     if (t.hasAttribute('data-onlymiss')) { state.ui.onlyMiss = !state.ui.onlyMiss; persist(false); render(); keepFocus('[data-onlymiss]'); return; }
+    if (t.hasAttribute('data-photo')) { location.hash = '#/foto/' + t.getAttribute('data-photo'); return; }
+    if (t.hasAttribute('data-ctab')) { state.ui.colTab = t.getAttribute('data-ctab'); persist(false); render(); keepFocus('[data-ctab="' + state.ui.colTab + '"]'); return; }
+    if (t.hasAttribute('data-pcopy')) { copyText(photoPrompt(), 'Prompt copiado. Cole na sua IA e mande a foto.'); return; }
+    if (t.hasAttribute('data-pai')) {
+      var ai = AIS.filter(function (a) { return a[0] === t.getAttribute('data-pai'); })[0];
+      readPhotoInputs();
+      copyText(photoPrompt(), 'Prompt copiado. Se a IA abrir vazia, é só colar.');
+      window.open(ai[2] + (ai[0] === 'gemini' ? '' : encodeURIComponent(photoPrompt())), '_blank', 'noopener');
+      return;
+    }
+    if (t.hasAttribute('data-pread')) { photoRead(); return; }
+    if (t.hasAttribute('data-pback')) { readPhotoReview(); photo.step = 'input'; photo.rows = null; render(); return; }
+    if (t.hasAttribute('data-pdel')) { readPhotoReview(); photo.rows.splice(+t.getAttribute('data-pdel'), 1); render(); keepFocus('[data-psave]'); return; }
+    if (t.hasAttribute('data-psave')) { photoSave(); return; }
     if (t.hasAttribute('data-card')) { openCard(t.getAttribute('data-card'), t); return; }
     if (t.hasAttribute('data-sort')) { state.ui.sort = t.getAttribute('data-sort'); persist(false); render(); keepFocus('[data-sort="' + state.ui.sort + '"]'); return; }
     if (t.hasAttribute('data-view')) { state.ui.view[route().id] = t.getAttribute('data-view'); persist(false); render(); keepFocus('[data-view="' + t.getAttribute('data-view') + '"]'); return; }
@@ -1664,6 +1994,7 @@
       var c = d && d.cards[+t.getAttribute('data-i')];
       if (!c) return;
       c.owned = c.owned >= c.qty ? 0 : c.qty;
+      if (!c.owned) c.eds = [];
       persist(true);
       var i = t.getAttribute('data-i');
       render();
@@ -1684,7 +2015,7 @@
       var id = t.getAttribute('data-id');
       var deck = deckById(id);
       if (deck && confirm('Excluir "' + deck.name + '"? Só dá para recuperar por um backup. As cartas que você marcou como "tenho" ficam guardadas.')) {
-        deck.cards.forEach(function (c) { putSpare(c.name, c.owned || 0); });
+        deck.cards.forEach(function (c) { putSpare(c.name, c.owned || 0, c.eds); });
         state.decks = state.decks.filter(function (x) { return x.id !== id; });
         persist(true);
         location.hash = '#/decks';
@@ -1728,21 +2059,21 @@
     if (id) {
       deck = deckById(id);
       deck.name = name; deck.format = format;
-      var before = {};
-      deck.cards.forEach(function (c) { var k = FU.key(canonical(c.name)); before[k] = (before[k] || 0) + (c.owned || 0); });
+      var before = {}, beforeEds = {};
+      deck.cards.forEach(function (c) { var k = FU.key(canonical(c.name)); before[k] = (before[k] || 0) + (c.owned || 0); beforeEds[k] = FU.edsMerge(beforeEds[k], FU.edsTake(c.eds, c.owned || 0).taken); });
       deck.cards = FU.mergeOwned(deck.cards, parsed.cards);
       var after = {};
       deck.cards.forEach(function (c) { var k = FU.key(canonical(c.name)); after[k] = (after[k] || 0) + (c.owned || 0); });
       Object.keys(before).forEach(function (k) {
         var lost = before[k] - (after[k] || 0);
-        if (lost > 0) { var src = deck.cards.filter(function (c) { return FU.key(canonical(c.name)) === k; }); putSpare(src[0] ? src[0].name : (cardInfo(k) || { name: k }).name, lost); }
+        if (lost > 0) { var src = deck.cards.filter(function (c) { return FU.key(canonical(c.name)) === k; }); putSpare(src[0] ? src[0].name : (cardInfo(k) || { name: k }).name, lost, FU.edsPop(beforeEds[k], before[k], lost).removed); }
       });
-      deck.cards.forEach(function (c) { if ((c.owned || 0) < c.qty) c.owned = (c.owned || 0) + takeSpare(c.name, c.qty - (c.owned || 0)); });
+      deck.cards.forEach(function (c) { if ((c.owned || 0) < c.qty) { var tk2 = takeSpareEds(c.name, c.qty - (c.owned || 0)); c.owned = (c.owned || 0) + tk2.n; c.eds = FU.edsMerge(c.eds, tk2.eds); } });
       persist(true);
     } else {
       deck = addDeck(name, format, text).deck;
       if (!deck.cards.length && format !== 'Lista') state.ui.view[deck.id + ':tab'] = 'research';
-      deck.cards.forEach(function (c) { c.owned = takeSpare(c.name, c.qty); });
+      deck.cards.forEach(function (c) { var tk3 = takeSpareEds(c.name, c.qty); c.owned = tk3.n; c.eds = tk3.eds; });
     }
     location.hash = '#/deck/' + deck.id;
     toast((format === 'Lista' ? (id ? 'Lista atualizada.' : 'Lista salva.') : (id ? 'Deck atualizado.' : 'Deck salvo.')) + (parsed.skipped.length ? ' Ignorei ' + parsed.skipped.length + ' linha(s) que não eram cartas.' : ''));

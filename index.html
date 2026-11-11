@@ -221,7 +221,7 @@ textarea{min-height:240px;font-family:var(--mono);font-size:.9375rem;line-height
 
 /* navegação */
 nav.tabs{position:fixed;left:0;right:0;bottom:0;background:var(--bg);border-top:1px solid var(--line);
-  display:grid;grid-template-columns:repeat(3,1fr);padding-bottom:env(safe-area-inset-bottom);z-index:12}
+  display:grid;grid-template-columns:repeat(4,1fr);padding-bottom:env(safe-area-inset-bottom);z-index:12}
 nav.tabs a{min-height:60px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
   color:var(--muted);text-decoration:none;font-size:.75rem;font-weight:750;position:relative}
 nav.tabs a[aria-current=page]{color:var(--accent)}
@@ -356,6 +356,19 @@ body.home .appbar{display:none}
 .acopt .acgo{color:var(--accent);font-weight:800;font-size:.875rem}
 .acnone{padding:12px;background:var(--surface);color:var(--text);font-weight:600}
 .acnone small{display:block;color:var(--muted);font-weight:500;font-size:.8125rem;margin-top:2px}
+/* v0.14: importar por foto, coleção e edições das cópias */
+.pphoto{gap:24px}
+.ph-h{display:flex;align-items:center;gap:10px;font-size:1.0625rem;font-weight:800;margin-bottom:8px}
+.ph-h span{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--accent);color:var(--on-accent);font-size:.9375rem;flex:none}
+.aibtns{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+.aibtns .btn{padding:6px 8px;white-space:normal;text-align:center;font-size:.875rem;line-height:1.2}
+.edline{display:flex;align-items:center;gap:8px;margin-top:6px}
+.edline img{width:56px;height:auto;aspect-ratio:488/680;border-radius:4px;flex:none;background:var(--surface-2)}
+.copies{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.copies li{display:flex;align-items:center;gap:12px}
+.copies .cp img{width:72px;height:auto;aspect-ratio:488/680;border-radius:4.75%/3.5%;display:block;background:var(--surface-2)}
+.copies .cph{display:flex;width:72px;aspect-ratio:488/680;align-items:center;justify-content:center;border-radius:6px;background:var(--surface-2);font-weight:800;font-size:.8125rem}
+.copies .cl{font-size:.9375rem}
 </style>
 </head>
 <body>
@@ -375,6 +388,9 @@ body.home .appbar{display:none}
   <a href="#/decks" data-tab="decks">
     <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="12" height="16" rx="2"/><path d="M4 7v12a2 2 0 0 0 2 2h9"/></svg>
     <span>Decks</span></a>
+  <a href="#/colecao" data-tab="colecao">
+    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="12" rx="2"/><path d="M7 8V6a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v2M3 13h18"/></svg>
+    <span>Coleção</span></a>
   <a href="#/mais" data-tab="mais">
     <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
     <span>Mais</span></a>
