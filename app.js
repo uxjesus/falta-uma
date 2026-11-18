@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.17.2';
+  var APP_VERSION = '0.17.3';
   var SNAP_KEY = 'fu.snap.v1';
   var VER_KEY = 'fu.appver';
 
@@ -1333,7 +1333,7 @@
       '<button class="btn full" data-act="friend">Ver o que eu tenho</button></section><div id="friendOut" aria-live="polite"></div>' +
       '<section class="card pad stack" aria-labelledby="bk"><h2 id="bk" style="font-size:1.0625rem">Backup dos seus decks</h2>' +
       (nag ? '<p class="small" style="color:var(--miss);font-weight:700">' + (state.lastBackup ? 'Seu último backup está desatualizado.' : 'Você ainda não fez backup.') + '</p>' : '') +
-      '<p class="muted small">Guarda seus decks e o que você marcou como \"tenho\" fora do celular. Toque em \"Enviar backup\" e escolha o WhatsApp. Mande para você mesmo (a conversa com o seu próprio número). Vai um arquivo com as instruções de como voltar. Não apague. Para voltar: toque no arquivo no WhatsApp, Compartilhar, Playset.</p>' +
+      '<p class="muted small">Guarda seus decks e o que você marcou como \"tenho\" fora do celular. Toque em \"Enviar backup\" e escolha o WhatsApp. Mande para você mesmo (a conversa com o seu próprio número). Vai um arquivo com as instruções de como voltar. Não apague. Para voltar: segure o arquivo no WhatsApp, toque em Compartilhar e escolha Playset.</p>' +
       '<p class="small">Último backup: <strong>' + (fmtDate(state.lastBackup) || 'nenhum') + '</strong></p>' +
       '<p class="small" id="bkStatus" role="status" aria-live="polite">' + (backupMsg ? '<strong>' + esc(backupMsg) + '</strong>' : '') + '</p>' +
       '<button class="btn primary full" data-act="backup">Enviar backup (WhatsApp, Telegram…)</button>' +
@@ -2396,7 +2396,7 @@
   function backupMessage(now) {
     var json = backupJson(now);
     return gzipToB64(json).then(function (code) {
-      var head = 'Backup do Playset de ' + fmtDate(now) + '\nGuarde isto. Para voltar: compartilhe este arquivo com o Playset, ou em Mais > Importar do texto cole tudo.\n\n';
+      var head = 'Backup do Playset de ' + fmtDate(now) + '\nGuarde isto. Para voltar: segure este arquivo no WhatsApp, toque em Compartilhar e escolha Playset.\n\n';
       return head + (code ? 'PLAYSET1:' + code + ':FIM' : json);
     });
   }
@@ -2449,7 +2449,7 @@
       var canFile = file && navigator.share && navigator.canShare && navigator.canShare({ files: [file] });
       if (!canFile) { sendBackupText(now, msg, file && navigator.share ? 'este celular não aceita anexo' : ''); return; }
       var note = 'Este é o seu backup do Playset de ' + fmtDate(now) + '. Não apague este arquivo nem esta conversa.\n\n' +
-        'Para voltar os decks: toque no arquivo aqui no WhatsApp, escolha Compartilhar e depois Playset. ' +
+        'Para voltar os decks: segure este arquivo aqui no WhatsApp, toque em Compartilhar e escolha Playset. ' +
         'O app pergunta se quer importar. Não precisa baixar nada.';
       var p;
       try { p = navigator.share({ files: [file], title: 'Backup Playset', text: note }); }
@@ -2464,24 +2464,43 @@
     });
   }
 
-  /* Lê um backup de qualquer forma que ele chegue: mensagem com código, JSON puro, ou a mensagem inteira colada. */
+  /* Lê um backup de qualquer forma que ele chegue: arquivo, mensagem com código, JSON puro ou a mensagem inteira colada.
+     O próprio gzip denuncia texto cortado (falha ao descomprimir), então o marcador :FIM não é obrigatório. */
   function decodeBackup(text) {
     text = String(text || '').replace(/^﻿/, '');
-    var parse = function (str) { try { var d = JSON.parse(str); return { data: d }; } catch (e) { return { data: null }; } };
-    var m = text.match(/PLAYSET1:([A-Za-z0-9+\/=\s]+?):FIM/);
-    if (m) {
-      return gunzipFromB64(m[1].replace(/\s+/g, '')).then(parse).catch(function () { return { data: null }; });
+    var parse = function (str) { try { var d = JSON.parse(str); return d && typeof d === 'object' ? d : null; } catch (e) { return null; } };
+    var at = text.indexOf('PLAYSET1:');
+    if (at >= 0) {
+      var rest = text.slice(at + 9);
+      var fim = rest.indexOf(':FIM');
+      var cands = [];
+      var clean = function (x) { return x.replace(/[^A-Za-z0-9+\/=]/g, ''); };
+      if (fim >= 0) cands.push(clean(rest.slice(0, fim)));
+      var first = rest.match(/^\s*([A-Za-z0-9+\/=]+)/);
+      if (first) cands.push(first[1]);
+      var runs = rest.match(/[A-Za-z0-9+\/=]+(?:[ \t]*\r?\n[ \t]*[A-Za-z0-9+\/=]+)*/);
+      if (runs) cands.push(clean(runs[0]));
+      var seen = {}, list = cands.filter(function (c) { if (!c || seen[c]) return false; seen[c] = 1; return true; });
+      var tryNext = function (i) {
+        if (i >= list.length) return Promise.resolve({ cut: true });
+        var c = list[i];
+        c = c.slice(0, c.length - (c.length % 4)); // base64 só fecha em múltiplos de 4
+        return gunzipFromB64(c).then(function (str) {
+          var d = parse(str);
+          return d ? { data: d } : tryNext(i + 1);
+        }).catch(function () { return tryNext(i + 1); });
+      };
+      return tryNext(0);
     }
-    if (/PLAYSET1:/.test(text)) return Promise.resolve({ cut: true });
-    var t = text.trim(), r = parse(t);
-    if (!r.data) { var i = t.indexOf('{'), j = t.lastIndexOf('}'); if (i >= 0 && j > i) r = parse(t.slice(i, j + 1)); }
-    return Promise.resolve(r);
+    var t = text.trim(), d = parse(t);
+    if (!d) { var i = t.indexOf('{'), j = t.lastIndexOf('}'); if (i >= 0 && j > i) d = parse(t.slice(i, j + 1)); }
+    return Promise.resolve({ data: d });
   }
 
   function restoreFromText(text) {
     return decodeBackup(text).then(function (res) {
       if (res.cut) {
-        setBackupMsg('O texto do backup parece cortado: falta o final. Copie a mensagem inteira e cole de novo.', 'Texto cortado.', false);
+        setBackupMsg('Esse texto está incompleto: o WhatsApp cortou o final da mensagem. Use o arquivo .txt do backup (ele não corta), ou faça um backup novo.', 'Texto cortado.', false);
         return false;
       }
       var data = res.data;
