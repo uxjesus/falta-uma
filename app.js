@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.17.0';
+  var APP_VERSION = '0.17.1';
   var SNAP_KEY = 'fu.snap.v1';
   var VER_KEY = 'fu.appver';
 
@@ -1333,19 +1333,18 @@
       '<button class="btn full" data-act="friend">Ver o que eu tenho</button></section><div id="friendOut" aria-live="polite"></div>' +
       '<section class="card pad stack" aria-labelledby="bk"><h2 id="bk" style="font-size:1.0625rem">Backup dos seus decks</h2>' +
       (nag ? '<p class="small" style="color:var(--miss);font-weight:700">' + (state.lastBackup ? 'Seu último backup está desatualizado.' : 'Você ainda não fez backup.') + '</p>' : '') +
-      '<p class="muted small">Guarda seus decks e o que você marcou como \"tenho\" fora do celular. Toque em \"Salvar backup\" e escolha para onde mandar (Telegram, WhatsApp, Drive, e-mail). Mande para você mesmo.</p>' +
+      '<p class="muted small">Guarda seus decks e o que você marcou como \"tenho\" fora do celular. Toque em \"Enviar backup\" e escolha o WhatsApp, o Telegram ou outro app. Mande para você mesmo (no WhatsApp, a conversa com o seu próprio número) e não apague a mensagem.</p>' +
       '<p class="small">Último backup: <strong>' + (fmtDate(state.lastBackup) || 'nenhum') + '</strong></p>' +
       '<p class="small" id="bkStatus" role="status" aria-live="polite">' + (backupMsg ? '<strong>' + esc(backupMsg) + '</strong>' : '') + '</p>' +
-      '<button class="btn primary full" data-act="backup">Salvar backup (escolher onde mandar)</button>' +
-      '<button class="btn full" data-act="backupdl">Baixar o arquivo</button>' +
+      '<button class="btn primary full" data-act="backup">Enviar backup (WhatsApp, Telegram…)</button>' +
       '<button class="btn full" data-act="backupcopy">Copiar o backup como texto</button>' +
-      '<h3 style="font-size:1rem;margin-top:12px">Importar um backup</h3>' +
-      '<p class="muted small">Escolha o arquivo que você salvou, ou cole o texto copiado. Antes de importar, guardo uma cópia do que está no app agora.</p>' +
-      '<label class="btn full" for="restore">Importar de um arquivo</label>' +
-      '<input type="file" id="restore" accept="*/*" class="visually-hidden">' +
-      '<label for="bkText" class="small">Ou cole aqui o texto do backup</label>' +
+      '<h3 style="font-size:1rem;margin-top:12px">Voltar um backup</h3>' +
+      '<p class="muted small">Abra a mensagem do backup, copie o texto inteiro e cole aqui. Antes de importar, guardo uma cópia do que está no app agora.</p>' +
+      '<label for="bkText" class="small">Cole aqui a mensagem do backup</label>' +
       '<textarea id="bkText" spellcheck="false" autocapitalize="off" style="min-height:96px"></textarea>' +
       '<button class="btn full" data-act="importtext">Importar do texto</button>' +
+      '<label class="btn full" for="restore">Importar de um arquivo (backup antigo)</label>' +
+      '<input type="file" id="restore" accept="*/*" class="visually-hidden">' +
       (function () {
         var sn = readSnap();
         if (!sn) return '';
@@ -2284,8 +2283,6 @@
       loadExamples();
     } else if (act === 'backup') {
       sendBackup();
-    } else if (act === 'backupdl') {
-      downloadBackup(Date.now());
     } else if (act === 'backupcopy') {
       copyBackup(Date.now());
     } else if (act === 'importtext') {
@@ -2363,92 +2360,125 @@
   function backupJson(now) {
     return JSON.stringify({ app: 'falta-uma', version: 2, savedAt: now, state: state, pr: db.pr || {} });
   }
-  function backupName(now, ext) {
-    var d = new Date(now);
-    return 'playset-backup-' + d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + '.' + ext;
-  }
   function markBackup(now) { state.lastBackup = now; persist(false); }
 
-  function downloadBackup(now) {
-    var json = backupJson(now), fname = backupName(now, 'json');
+  /* O backup viaja como texto (mensagem de WhatsApp, Telegram, nota). Comprimido, para caber e para não virar um paredão. */
+  function b64FromBytes(u8) {
+    var s = '';
+    for (var i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+  function bytesFromB64(b64) {
+    var s = atob(b64), u = new Uint8Array(s.length);
+    for (var i = 0; i < s.length; i++) u[i] = s.charCodeAt(i);
+    return u;
+  }
+  function gzipToB64(str) {
+    if (!window.CompressionStream || !window.Response) return Promise.resolve(null);
     try {
-      var url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
-      var a = document.createElement('a');
-      a.href = url; a.download = fname;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(function () { URL.revokeObjectURL(url); }, 15000);
-      markBackup(now);
-      setBackupMsg('Baixei o arquivo ' + fname + '. Procure na pasta Downloads do celular e guarde onde preferir. Se não aparecer lá, use \"Copiar o backup como texto\".', 'Arquivo baixado.', true);
-    } catch (e) {
-      setBackupMsg('Não consegui baixar o arquivo. Use \"Copiar o backup como texto\" e cole numa conversa com você mesmo.', 'Não consegui baixar.', true);
-    }
+      var cs = new CompressionStream('gzip');
+      var wr = cs.writable.getWriter();
+      wr.write(new TextEncoder().encode(str)).catch(function () {});
+      wr.close().catch(function () {});
+      return new Response(cs.readable).arrayBuffer().then(function (buf) { return b64FromBytes(new Uint8Array(buf)); }).catch(function () { return null; });
+    } catch (e) { return Promise.resolve(null); }
+  }
+  function gunzipFromB64(b64) {
+    if (!window.DecompressionStream || !window.Response) return Promise.reject(new Error('sem suporte'));
+    var ds = new DecompressionStream('gzip');
+    var wr = ds.writable.getWriter();
+    wr.write(bytesFromB64(b64)).catch(function () {});
+    wr.close().catch(function () {});
+    return new Response(ds.readable).text();
+  }
+  var BACKUP_MAX_CHARS = 60000; // abaixo do limite de uma mensagem do WhatsApp
+  /* Monta a mensagem do backup: cabeçalho legível + código (ou o JSON puro, se o aparelho não comprime). */
+  function backupMessage(now) {
+    var json = backupJson(now);
+    return gzipToB64(json).then(function (code) {
+      var head = 'Backup do Playset de ' + fmtDate(now) + '\nGuarde esta mensagem. Para voltar: Mais > Importar do texto, e cole a mensagem inteira.\n\n';
+      return head + (code ? 'PLAYSET1:' + code + ':FIM' : json);
+    });
   }
 
   function copyBackup(now) {
-    var json = backupJson(now);
-    var ok = function () {
-      markBackup(now);
-      setBackupMsg('Copiei o backup (' + Math.max(1, Math.round(json.length / 1024)) + ' KB de texto). Cole numa conversa com você mesmo, por exemplo \"Mensagens salvas\" do Telegram, ou numa nota. Para voltar, cole o texto em \"Importar do texto\".', 'Backup copiado.', true);
-    };
-    var fail = function () { setBackupMsg('Não consegui copiar. Tente \"Salvar backup\" ou \"Baixar o arquivo\".', 'Não consegui copiar.', false); };
-    var legacy = function () {
-      var ta = document.createElement('textarea');
-      ta.value = json; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
-      document.body.appendChild(ta); ta.select();
-      var good = false;
-      try { good = document.execCommand('copy'); } catch (e) {}
-      document.body.removeChild(ta);
-      if (good) ok(); else fail();
-    };
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(json).then(ok, legacy);
-    else legacy();
+    backupMessage(now).then(function (msg) {
+      var ok = function () {
+        markBackup(now);
+        setBackupMsg('Copiei o backup. Cole numa conversa com você mesmo (no WhatsApp, a conversa com o seu próprio número) ou numa nota, e não apague. Para voltar, cole o texto em \"Importar do texto\".', 'Backup copiado.', true);
+      };
+      var fail = function () { setBackupMsg('Não consegui copiar o backup. Tente de novo em alguns segundos.', 'Não consegui copiar.', false); };
+      var legacy = function () {
+        var ta = document.createElement('textarea');
+        ta.value = msg; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        var good = false;
+        try { good = document.execCommand('copy'); } catch (e) {}
+        document.body.removeChild(ta);
+        if (good) ok(); else fail();
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(msg).then(ok, legacy);
+      else legacy();
+    });
   }
 
-  /* Compartilhar do celular. Tenta o arquivo .json, depois um arquivo de texto (mais aceito pelos apps) e, se nada abrir, baixa o arquivo. */
+  /* Enviar: abre o compartilhar do celular com o backup como texto. Se não der, copia o texto. */
   function sendBackup() {
-    var now = Date.now(), json = backupJson(now);
-    var files = [];
-    try { files.push(new File([json], backupName(now, 'json'), { type: 'application/json' })); } catch (e) {}
-    try { files.push(new File([json], backupName(now, 'txt'), { type: 'text/plain' })); } catch (e) {}
-    var can = files.filter(function (f) {
-      try { return !!(navigator.share && navigator.canShare && navigator.canShare({ files: [f] })); } catch (e) { return false; }
-    });
-    var attempt = function (i) {
-      if (i >= can.length) { downloadBackup(now); return; }
+    var now = Date.now();
+    backupMessage(now).then(function (msg) {
+      if (!navigator.share || msg.length > BACKUP_MAX_CHARS) { copyBackup(now); return; }
       var p;
-      try { p = navigator.share({ files: [can[i]], title: 'Backup Playset', text: 'Backup dos meus decks (Playset) de ' + fmtDate(now) }); }
-      catch (e) { attempt(i + 1); return; }
+      try { p = navigator.share({ title: 'Backup Playset', text: msg }); }
+      catch (e) { copyBackup(now); return; }
       p.then(function () {
         markBackup(now);
-        setBackupMsg('Compartilhei o backup. Confira se ele chegou onde você mandou (Telegram, e-mail, Drive).', 'Backup compartilhado.', true);
+        setBackupMsg('Compartilhei o backup. Confira se a mensagem chegou onde você mandou e não apague.', 'Backup compartilhado.', true);
       }).catch(function (err) {
         if (err && err.name === 'AbortError') { setBackupMsg('Você fechou a lista de apps antes de enviar. O backup não foi salvo.', 'Backup não enviado.', false); return; }
-        attempt(i + 1);
+        copyBackup(now);
       });
-    };
-    attempt(0);
+    });
+  }
+
+  /* Lê um backup de qualquer forma que ele chegue: mensagem com código, JSON puro, ou a mensagem inteira colada. */
+  function decodeBackup(text) {
+    text = String(text || '').replace(/^﻿/, '');
+    var parse = function (str) { try { var d = JSON.parse(str); return { data: d }; } catch (e) { return { data: null }; } };
+    var m = text.match(/PLAYSET1:([A-Za-z0-9+\/=\s]+?):FIM/);
+    if (m) {
+      return gunzipFromB64(m[1].replace(/\s+/g, '')).then(parse).catch(function () { return { data: null }; });
+    }
+    if (/PLAYSET1:/.test(text)) return Promise.resolve({ cut: true });
+    var t = text.trim(), r = parse(t);
+    if (!r.data) { var i = t.indexOf('{'), j = t.lastIndexOf('}'); if (i >= 0 && j > i) r = parse(t.slice(i, j + 1)); }
+    return Promise.resolve(r);
   }
 
   function restoreFromText(text) {
-    var data = null;
-    try { data = JSON.parse(String(text || '').replace(/^﻿/, '').trim()); } catch (e) {}
-    if (!data || data.app !== 'falta-uma' || !data.state || !Array.isArray(data.state.decks)) {
-      setBackupMsg('Isso não parece um backup do Playset. Use o arquivo ou o texto que o próprio app gerou em \"Salvar backup\".', 'Não é um backup do Playset.', false);
-      return false;
-    }
-    var when = fmtDate(data.savedAt) || 'data desconhecida';
-    if (!confirm('Importar ' + data.state.decks.length + ' deck(s) do backup de ' + when + '? Os decks atuais serão substituídos. Antes, guardo uma cópia do que está no app agora.')) return false;
-    takeSnap('Antes de importar o backup de ' + when, JSON.stringify(state));
-    state = data.state;
-    state.ui = state.ui || { sort: 'name', deck: 'all', view: {} };
-    if (data.cards) db = data.cards; // backups antigos levavam os dados das cartas
-    else if (data.pr) { db.pr = db.pr || {}; Object.keys(data.pr).forEach(function (k) { db.pr[k] = data.pr[k]; }); }
-    persist(false); persistDb();
-    backupMsg = 'Backup de ' + when + ' importado.';
-    location.hash = '#/decks';
-    render();
-    toast('Backup importado.');
-    return true;
+    return decodeBackup(text).then(function (res) {
+      if (res.cut) {
+        setBackupMsg('O texto do backup parece cortado: falta o final. Copie a mensagem inteira e cole de novo.', 'Texto cortado.', false);
+        return false;
+      }
+      var data = res.data;
+      if (!data || data.app !== 'falta-uma' || !data.state || !Array.isArray(data.state.decks)) {
+        setBackupMsg('Isso não parece um backup do Playset. Cole a mensagem que o próprio app gerou em \"Enviar backup\".', 'Não é um backup do Playset.', false);
+        return false;
+      }
+      var when = fmtDate(data.savedAt) || 'data desconhecida';
+      if (!confirm('Importar ' + data.state.decks.length + ' deck(s) do backup de ' + when + '? Os decks atuais serão substituídos. Antes, guardo uma cópia do que está no app agora.')) return false;
+      takeSnap('Antes de importar o backup de ' + when, JSON.stringify(state));
+      state = data.state;
+      state.ui = state.ui || { sort: 'name', deck: 'all', view: {} };
+      if (data.cards) db = data.cards; // backups antigos levavam os dados das cartas
+      else if (data.pr) { db.pr = db.pr || {}; Object.keys(data.pr).forEach(function (k) { db.pr[k] = data.pr[k]; }); }
+      persist(false); persistDb();
+      backupMsg = 'Backup de ' + when + ' importado.';
+      location.hash = '#/decks';
+      render();
+      toast('Backup importado.');
+      return true;
+    });
   }
 
   function restoreSnap() {
@@ -2474,7 +2504,7 @@
     var input = e.target;
     if (f.size > 5 * 1024 * 1024) { setBackupMsg('Esse arquivo é grande demais para ser um backup do Playset.', 'Arquivo grande demais.', false); input.value = ''; return; }
     var reader = new FileReader();
-    reader.onload = function () { restoreFromText(reader.result); input.value = ''; };
+    reader.onload = function () { restoreFromText(reader.result).then(function () { input.value = ''; }); };
     reader.onerror = function () { setBackupMsg('Não consegui abrir esse arquivo.', 'Não consegui abrir o arquivo.', false); input.value = ''; };
     reader.readAsText(f);
   });
