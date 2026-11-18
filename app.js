@@ -9,8 +9,8 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.17.3';
-  var SNAP_KEY = 'fu.snap.v1';
+  var APP_VERSION = '0.18.0';
+  var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.netlify.app/api/backup';
   var VER_KEY = 'fu.appver';
 
   /* ---------- cópia de segurança automática ----------
@@ -48,7 +48,7 @@
   var state = load(STATE_KEY, null) || { decks: [], lastBackup: null, changedAt: null };
   state.ui = state.ui || { sort: 'name', deck: 'all', view: {} };
   var db = load(CARDS_KEY, null) || { cards: {}, alias: {}, updatedAt: null, rate: null };
-  function persist(changed) { if (changed) state.changedAt = Date.now(); save(STATE_KEY, state); }
+  function persist(changed) { if (changed) state.changedAt = Date.now(); save(STATE_KEY, state); if (changed) scheduleSync(); }
   function persistDb() { db.v = DATA_VERSION; save(CARDS_KEY, db); }
 
   function cardInfo(name) {
@@ -1331,6 +1331,7 @@
       '<p class="muted small">Cole a lista que ele mandou. Eu mostro quais dessas cartas você marcou que tem, nos decks, nas listas ou guardadas.</p>' +
       '<label for="fl" class="visually-hidden">Lista do amigo</label><textarea id="fl" spellcheck="false" autocapitalize="off" style="min-height:140px" placeholder="4 Counterspell&#10;2 Wild Mongrel"></textarea>' +
       '<button class="btn full" data-act="friend">Ver o que eu tenho</button></section><div id="friendOut" aria-live="polite"></div>' +
+      syncSectionHtml() +
       '<section class="card pad stack" aria-labelledby="bk"><h2 id="bk" style="font-size:1.0625rem">Backup dos seus decks</h2>' +
       (nag ? '<p class="small" style="color:var(--miss);font-weight:700">' + (state.lastBackup ? 'Seu último backup está desatualizado.' : 'Você ainda não fez backup.') + '</p>' : '') +
       '<p class="muted small">Guarda seus decks e o que você marcou como \"tenho\" fora do celular. Toque em \"Enviar backup\" e escolha o WhatsApp. Mande para você mesmo (a conversa com o seu próprio número). Vai um arquivo com as instruções de como voltar. Não apague. Para voltar: segure o arquivo no WhatsApp, toque em Compartilhar e escolha Playset.</p>' +
@@ -2283,6 +2284,14 @@
       loadExamples();
     } else if (act === 'backup') {
       sendBackup();
+    } else if (act === 'syncon') {
+      activateSync((document.getElementById('syKey') || {}).value);
+    } else if (act === 'syncnow') {
+      pushSync(true);
+    } else if (act === 'syncrestore') {
+      restoreFromCloud();
+    } else if (act === 'syncoff') {
+      if (confirm('Desativar o backup automático neste celular? Seus decks aqui continuam; a cópia que já está na nuvem fica lá.')) { saveSync({}); setSyncMsg('Desativado neste celular.', true); }
     } else if (act === 'backupcopy') {
       copyBackup(Date.now());
     } else if (act === 'importtext') {
@@ -2356,6 +2365,105 @@
     else { var el = document.getElementById('bkStatus'); if (el) el.innerHTML = '<strong>' + esc(longMsg) + '</strong>'; }
     toast(shortToast || longMsg);
   }
+
+  /* ---------- backup automático na nuvem (só com a chave do Érick; sem chave, nada sai do celular) ---------- */
+  var syncMsg = '', syncTimer = null, syncBusy = false;
+  function loadSync() { try { return JSON.parse(localStorage.getItem(SYNC_KEY)) || {}; } catch (e) { return {}; } }
+  function saveSync(o) { try { localStorage.setItem(SYNC_KEY, JSON.stringify(o)); } catch (e) {} }
+  function hhmm(ts) { var d = new Date(ts), p = function (n) { return (n < 10 ? '0' : '') + n; }; return p(d.getDate()) + '/' + p(d.getMonth() + 1) + ' às ' + p(d.getHours()) + ':' + p(d.getMinutes()); }
+  function setSyncMsg(msg, rerender) {
+    syncMsg = msg;
+    if (rerender && route().name === 'mais') { var y = window.scrollY; render(); window.scrollTo(0, y); }
+    else { var el = document.getElementById('syStatus'); if (el) el.innerHTML = '<strong>' + esc(msg) + '</strong>'; }
+  }
+  function syncFetch(method, key, body) {
+    var opts = { method: method, headers: { Authorization: 'Bearer ' + key } };
+    if (body != null) { opts.body = body; opts.headers['Content-Type'] = 'application/json'; }
+    return fetch(SYNC_URL, opts);
+  }
+  function scheduleSync() {
+    if (!loadSync().key) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(function () { pushSync(false); }, 4000);
+  }
+  function pushSync(manual) {
+    var sy = loadSync();
+    if (!sy.key || syncBusy) return Promise.resolve();
+    if (!state.decks.length) { if (manual) setSyncMsg('Não há decks para salvar.', true); return Promise.resolve(); }
+    if (!navigator.onLine) { if (manual) setSyncMsg('Sem internet agora. Salvo sozinho quando voltar.', true); return Promise.resolve(); }
+    syncBusy = true;
+    var sentAt = state.changedAt || 0;
+    return syncFetch('PUT', sy.key, backupJson(Date.now())).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        syncBusy = false;
+        if (r.ok) {
+          sy = loadSync(); sy.at = j.savedAt || Date.now(); sy.pushed = sentAt; sy.err = null; saveSync(sy);
+          state.lastBackup = sy.at; persist(false);
+          setSyncMsg('Salvo na nuvem em ' + hhmm(sy.at) + '.', manual);
+          if (manual) toast('Backup salvo na nuvem.');
+        } else if (r.status === 401) {
+          setSyncMsg('A chave não foi aceita. Confira a chave e ative de novo.', true);
+        } else {
+          setSyncMsg('Não consegui salvar na nuvem agora (' + (j.error || 'erro ' + r.status) + '). Tento de novo na próxima mudança.', manual);
+        }
+      });
+    }).catch(function () {
+      syncBusy = false;
+      setSyncMsg('Não consegui falar com a nuvem. Tento de novo na próxima mudança.', manual);
+    });
+  }
+  function activateSync(key) {
+    key = String(key || '').trim().toLowerCase();
+    if (!key) { setSyncMsg('Digite a chave primeiro.', true); return; }
+    if (!navigator.onLine) { setSyncMsg('Sem internet agora. Tente de novo com conexão.', true); return; }
+    setSyncMsg('Conferindo a chave…', false);
+    syncFetch('GET', key).then(function (r) {
+      if (r.status === 401) { setSyncMsg('Essa chave não foi aceita. Confira e tente de novo.', true); return; }
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        saveSync({ key: key });
+        if (r.ok && j.data && j.data.state && j.data.state.decks.length) {
+          var n = j.data.state.decks.length, when = hhmm(j.savedAt || j.data.savedAt || Date.now());
+          if (!state.decks.length || confirm('Já existe um backup na nuvem (' + n + ' deck(s), de ' + when + '). Trazer ele para este celular? OK substitui os decks daqui. Cancelar mantém os daqui e atualiza a nuvem.')) {
+            restoreFromText(JSON.stringify(j.data)).then(function (ok) {
+              if (ok) setSyncMsg('Ativado. Decks trazidos da nuvem.', true); else pushSync(true);
+            });
+            return;
+          }
+        }
+        setSyncMsg('Ativado. Vou salvar na nuvem a cada mudança.', true);
+        pushSync(true);
+      });
+    }).catch(function () { setSyncMsg('Não consegui falar com a nuvem. Tente de novo.', true); });
+  }
+  function restoreFromCloud() {
+    var sy = loadSync();
+    if (!sy.key) return;
+    if (!navigator.onLine) { setSyncMsg('Sem internet agora.', true); return; }
+    syncFetch('GET', sy.key).then(function (r) {
+      if (r.status === 401) { setSyncMsg('A chave não foi aceita.', true); return; }
+      if (r.status === 404) { setSyncMsg('Ainda não há backup na nuvem.', true); return; }
+      return r.json().then(function (j) { return restoreFromText(JSON.stringify(j.data)); }).then(function (ok) { if (ok) setSyncMsg('Decks trazidos da nuvem.', true); });
+    }).catch(function () { setSyncMsg('Não consegui falar com a nuvem.', true); });
+  }
+  function syncSectionHtml() {
+    var sy = loadSync();
+    var h = '<section class="card pad stack" aria-labelledby="sy"><h2 id="sy" style="font-size:1.0625rem">Backup automático</h2>';
+    if (sy.key) {
+      h += '<p class="small">Ativo. Cada mudança nos decks é salva na nuvem sozinha, sem você fazer nada.</p>' +
+        '<p class="small" id="syStatus" role="status" aria-live="polite"><strong>' + esc(syncMsg || (sy.at ? 'Último salvamento: ' + hhmm(sy.at) + '.' : 'Ainda não salvou.')) + '</strong></p>' +
+        '<button class="btn primary full" data-act="syncnow">Salvar agora</button>' +
+        '<button class="btn full" data-act="syncrestore">Voltar da nuvem</button>' +
+        '<button class="btn full" data-act="syncoff">Desativar neste celular</button>';
+    } else {
+      h += '<p class="muted small">Salva seus decks na nuvem a cada mudança. Precisa de uma chave (só quem recebeu uma chave consegue ativar). Sem chave, use o backup pelo WhatsApp logo abaixo.</p>' +
+        '<p class="small" id="syStatus" role="status" aria-live="polite">' + (syncMsg ? '<strong>' + esc(syncMsg) + '</strong>' : '') + '</p>' +
+        '<label for="syKey" class="small">Chave do backup</label>' +
+        '<input id="syKey" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="xxxx-xxxx-xxxx">' +
+        '<button class="btn primary full" data-act="syncon">Ativar</button>';
+    }
+    return h + '</section>';
+  }
+
   /* O backup leva os decks e tudo o que você marcou. Os dados das cartas (preços, imagens) baixam de novo com internet. */
   function backupJson(now) {
     return JSON.stringify({ app: 'falta-uma', version: 2, savedAt: now, state: state, pr: db.pr || {} });
@@ -2580,7 +2688,8 @@
   if (navigator.onLine && state.decks.length && (needsUpgrade || !db.updatedAt || Date.now() - db.updatedAt > STALE_MS)) {
     refreshPrices({ silent: true });
   }
-  window.addEventListener('online', function () { setStatus(); });
+  window.addEventListener('online', function () { setStatus(); scheduleSync(); });
+  (function () { var sy = loadSync(); if (sy.key && state.decks.length && (state.changedAt || 0) > (sy.pushed || 0)) scheduleSync(); })();
   if ('serviceWorker' in navigator && location.protocol === 'https:' && window.isSecureContext) {
     try { navigator.serviceWorker.register('sw.js').catch(function () {}); } catch (e) {}
   }
