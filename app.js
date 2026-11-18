@@ -9,6 +9,33 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
+  var APP_VERSION = '0.17.0';
+  var SNAP_KEY = 'fu.snap.v1';
+  var VER_KEY = 'fu.appver';
+
+  /* ---------- cópia de segurança automática ----------
+     Antes de qualquer outra coisa mexer nos dados, na primeira abertura de cada versão nova
+     o app guarda uma cópia dos decks como estavam. Só existe uma cópia (a mais recente). */
+  function takeSnap(reason, raw) {
+    try {
+      if (!raw) return false;
+      var p = JSON.parse(raw);
+      if (!p || !p.decks || !p.decks.length) return false; // nunca troca uma cópia boa por um estado vazio
+      localStorage.setItem(SNAP_KEY, JSON.stringify({ at: Date.now(), reason: reason, raw: raw }));
+      return true;
+    } catch (e) { return false; }
+  }
+  function readSnap() {
+    try { var s = JSON.parse(localStorage.getItem(SNAP_KEY)); return s && s.raw ? s : null; } catch (e) { return null; }
+  }
+  (function () {
+    try {
+      if (localStorage.getItem(VER_KEY) !== APP_VERSION) {
+        takeSnap('Antes de atualizar para a v' + APP_VERSION, localStorage.getItem(STATE_KEY));
+        localStorage.setItem(VER_KEY, APP_VERSION);
+      }
+    } catch (e) {}
+  })();
 
   /* ---------- armazenamento ---------- */
   function load(k, fallback) {
@@ -1304,13 +1331,28 @@
       '<p class="muted small">Cole a lista que ele mandou. Eu mostro quais dessas cartas você marcou que tem, nos decks, nas listas ou guardadas.</p>' +
       '<label for="fl" class="visually-hidden">Lista do amigo</label><textarea id="fl" spellcheck="false" autocapitalize="off" style="min-height:140px" placeholder="4 Counterspell&#10;2 Wild Mongrel"></textarea>' +
       '<button class="btn full" data-act="friend">Ver o que eu tenho</button></section><div id="friendOut" aria-live="polite"></div>' +
-      '<section class="card pad stack" aria-labelledby="bk"><h2 id="bk" style="font-size:1.0625rem">Backup no seu e-mail</h2>' +
+      '<section class="card pad stack" aria-labelledby="bk"><h2 id="bk" style="font-size:1.0625rem">Backup dos seus decks</h2>' +
       (nag ? '<p class="small" style="color:var(--miss);font-weight:700">' + (state.lastBackup ? 'Seu último backup está desatualizado.' : 'Você ainda não fez backup.') + '</p>' : '') +
-      '<p class="muted small">Abre o compartilhar do Android: escolha o Gmail e mande para você mesmo. Para restaurar, baixe o anexo do e-mail e escolha o arquivo aqui.</p>' +
+      '<p class="muted small">Guarda seus decks e o que você marcou como \"tenho\" fora do celular. Toque em \"Salvar backup\" e escolha para onde mandar (Telegram, WhatsApp, Drive, e-mail). Mande para você mesmo.</p>' +
       '<p class="small">Último backup: <strong>' + (fmtDate(state.lastBackup) || 'nenhum') + '</strong></p>' +
-      '<button class="btn full" data-act="backup">Enviar backup por e-mail</button>' +
-      '<label class="btn full" for="restore" style="margin-top:8px">Restaurar de um arquivo</label>' +
-      '<input type="file" id="restore" accept=".json,application/json" class="visually-hidden"></section>' +
+      '<p class="small" id="bkStatus" role="status" aria-live="polite">' + (backupMsg ? '<strong>' + esc(backupMsg) + '</strong>' : '') + '</p>' +
+      '<button class="btn primary full" data-act="backup">Salvar backup (escolher onde mandar)</button>' +
+      '<button class="btn full" data-act="backupdl">Baixar o arquivo</button>' +
+      '<button class="btn full" data-act="backupcopy">Copiar o backup como texto</button>' +
+      '<h3 style="font-size:1rem;margin-top:12px">Importar um backup</h3>' +
+      '<p class="muted small">Escolha o arquivo que você salvou, ou cole o texto copiado. Antes de importar, guardo uma cópia do que está no app agora.</p>' +
+      '<label class="btn full" for="restore">Importar de um arquivo</label>' +
+      '<input type="file" id="restore" accept="*/*" class="visually-hidden">' +
+      '<label for="bkText" class="small">Ou cole aqui o texto do backup</label>' +
+      '<textarea id="bkText" spellcheck="false" autocapitalize="off" style="min-height:96px"></textarea>' +
+      '<button class="btn full" data-act="importtext">Importar do texto</button>' +
+      (function () {
+        var sn = readSnap();
+        if (!sn) return '';
+        return '<h3 style="font-size:1rem;margin-top:12px">Cópia automática</h3>' +
+          '<p class="muted small">' + esc(sn.reason) + ' · guardada em ' + esc(fmtDate(sn.at)) + '. Se alguma atualização bagunçar seus decks, volte para ela.</p>' +
+          '<button class="btn full" data-act="snaprestore">Voltar os decks para essa cópia</button>';
+      })() + '</section>' +
       '<p class="xs muted">Dados, imagens e símbolos das cartas: Scryfall. Playset não é afiliado à Wizards of the Coast.</p></div>';
   }
 
@@ -2242,6 +2284,16 @@
       loadExamples();
     } else if (act === 'backup') {
       sendBackup();
+    } else if (act === 'backupdl') {
+      downloadBackup(Date.now());
+    } else if (act === 'backupcopy') {
+      copyBackup(Date.now());
+    } else if (act === 'importtext') {
+      var bt = document.getElementById('bkText');
+      if (!bt || !bt.value.trim()) { setBackupMsg('Cole o texto do backup no campo antes de importar.', 'Cole o texto primeiro.', false); if (bt) bt.focus(); }
+      else restoreFromText(bt.value);
+    } else if (act === 'snaprestore') {
+      restoreSnap();
     } else if (act === 'friend') {
       var txt = document.getElementById('fl').value;
       var out = document.getElementById('friendOut');
@@ -2298,47 +2350,134 @@
     if (fresh.length) refreshPrices({ only: fresh, silent: true });
   });
 
+  /* ---------- backup e importação ---------- */
+  var backupMsg = '';
+  /* Mostra o resultado na própria tela (fica até a próxima ação) e num aviso curto. */
+  function setBackupMsg(longMsg, shortToast, rerender) {
+    backupMsg = longMsg;
+    if (rerender && route().name === 'mais') { var y = window.scrollY; render(); window.scrollTo(0, y); }
+    else { var el = document.getElementById('bkStatus'); if (el) el.innerHTML = '<strong>' + esc(longMsg) + '</strong>'; }
+    toast(shortToast || longMsg);
+  }
+  /* O backup leva os decks e tudo o que você marcou. Os dados das cartas (preços, imagens) baixam de novo com internet. */
+  function backupJson(now) {
+    return JSON.stringify({ app: 'falta-uma', version: 2, savedAt: now, state: state, pr: db.pr || {} });
+  }
+  function backupName(now, ext) {
+    var d = new Date(now);
+    return 'playset-backup-' + d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + '.' + ext;
+  }
+  function markBackup(now) { state.lastBackup = now; persist(false); }
+
+  function downloadBackup(now) {
+    var json = backupJson(now), fname = backupName(now, 'json');
+    try {
+      var url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+      var a = document.createElement('a');
+      a.href = url; a.download = fname;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 15000);
+      markBackup(now);
+      setBackupMsg('Baixei o arquivo ' + fname + '. Procure na pasta Downloads do celular e guarde onde preferir. Se não aparecer lá, use \"Copiar o backup como texto\".', 'Arquivo baixado.', true);
+    } catch (e) {
+      setBackupMsg('Não consegui baixar o arquivo. Use \"Copiar o backup como texto\" e cole numa conversa com você mesmo.', 'Não consegui baixar.', true);
+    }
+  }
+
+  function copyBackup(now) {
+    var json = backupJson(now);
+    var ok = function () {
+      markBackup(now);
+      setBackupMsg('Copiei o backup (' + Math.max(1, Math.round(json.length / 1024)) + ' KB de texto). Cole numa conversa com você mesmo, por exemplo \"Mensagens salvas\" do Telegram, ou numa nota. Para voltar, cole o texto em \"Importar do texto\".', 'Backup copiado.', true);
+    };
+    var fail = function () { setBackupMsg('Não consegui copiar. Tente \"Salvar backup\" ou \"Baixar o arquivo\".', 'Não consegui copiar.', false); };
+    var legacy = function () {
+      var ta = document.createElement('textarea');
+      ta.value = json; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      var good = false;
+      try { good = document.execCommand('copy'); } catch (e) {}
+      document.body.removeChild(ta);
+      if (good) ok(); else fail();
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(json).then(ok, legacy);
+    else legacy();
+  }
+
+  /* Compartilhar do celular. Tenta o arquivo .json, depois um arquivo de texto (mais aceito pelos apps) e, se nada abrir, baixa o arquivo. */
+  function sendBackup() {
+    var now = Date.now(), json = backupJson(now);
+    var files = [];
+    try { files.push(new File([json], backupName(now, 'json'), { type: 'application/json' })); } catch (e) {}
+    try { files.push(new File([json], backupName(now, 'txt'), { type: 'text/plain' })); } catch (e) {}
+    var can = files.filter(function (f) {
+      try { return !!(navigator.share && navigator.canShare && navigator.canShare({ files: [f] })); } catch (e) { return false; }
+    });
+    var attempt = function (i) {
+      if (i >= can.length) { downloadBackup(now); return; }
+      var p;
+      try { p = navigator.share({ files: [can[i]], title: 'Backup Playset', text: 'Backup dos meus decks (Playset) de ' + fmtDate(now) }); }
+      catch (e) { attempt(i + 1); return; }
+      p.then(function () {
+        markBackup(now);
+        setBackupMsg('Compartilhei o backup. Confira se ele chegou onde você mandou (Telegram, e-mail, Drive).', 'Backup compartilhado.', true);
+      }).catch(function (err) {
+        if (err && err.name === 'AbortError') { setBackupMsg('Você fechou a lista de apps antes de enviar. O backup não foi salvo.', 'Backup não enviado.', false); return; }
+        attempt(i + 1);
+      });
+    };
+    attempt(0);
+  }
+
+  function restoreFromText(text) {
+    var data = null;
+    try { data = JSON.parse(String(text || '').replace(/^﻿/, '').trim()); } catch (e) {}
+    if (!data || data.app !== 'falta-uma' || !data.state || !Array.isArray(data.state.decks)) {
+      setBackupMsg('Isso não parece um backup do Playset. Use o arquivo ou o texto que o próprio app gerou em \"Salvar backup\".', 'Não é um backup do Playset.', false);
+      return false;
+    }
+    var when = fmtDate(data.savedAt) || 'data desconhecida';
+    if (!confirm('Importar ' + data.state.decks.length + ' deck(s) do backup de ' + when + '? Os decks atuais serão substituídos. Antes, guardo uma cópia do que está no app agora.')) return false;
+    takeSnap('Antes de importar o backup de ' + when, JSON.stringify(state));
+    state = data.state;
+    state.ui = state.ui || { sort: 'name', deck: 'all', view: {} };
+    if (data.cards) db = data.cards; // backups antigos levavam os dados das cartas
+    else if (data.pr) { db.pr = db.pr || {}; Object.keys(data.pr).forEach(function (k) { db.pr[k] = data.pr[k]; }); }
+    persist(false); persistDb();
+    backupMsg = 'Backup de ' + when + ' importado.';
+    location.hash = '#/decks';
+    render();
+    toast('Backup importado.');
+    return true;
+  }
+
+  function restoreSnap() {
+    var sn = readSnap();
+    if (!sn) return;
+    if (!confirm('Voltar os decks para a cópia de ' + fmtDate(sn.at) + ' (' + sn.reason + ')? O que está no app agora fica guardado antes.')) return;
+    var restored;
+    try { restored = JSON.parse(sn.raw); } catch (e) { toast('Essa cópia não pôde ser lida.'); return; }
+    takeSnap('Antes de voltar à cópia de ' + fmtDate(sn.at), JSON.stringify(state));
+    state = restored;
+    state.ui = state.ui || { sort: 'name', deck: 'all', view: {} };
+    persist(false);
+    backupMsg = 'Voltei os decks para a cópia de ' + fmtDate(sn.at) + '.';
+    location.hash = '#/decks';
+    render();
+    toast('Cópia restaurada.');
+  }
+
   main.addEventListener('change', function (e) {
     if (e.target.id !== 'restore') return;
     var f = e.target.files && e.target.files[0];
     if (!f) return;
+    var input = e.target;
+    if (f.size > 5 * 1024 * 1024) { setBackupMsg('Esse arquivo é grande demais para ser um backup do Playset.', 'Arquivo grande demais.', false); input.value = ''; return; }
     var reader = new FileReader();
-    reader.onload = function () {
-      try {
-        var data = JSON.parse(reader.result);
-        if (!data || data.app !== 'falta-uma' || !Array.isArray(data.state && data.state.decks)) throw new Error('formato');
-        if (!confirm('Restaurar ' + data.state.decks.length + ' deck(s) do backup de ' + fmtDate(data.savedAt) + '? Os decks atuais serão substituídos.')) return;
-        state = data.state;
-        state.ui = state.ui || { sort: 'name', deck: 'all', view: {} };
-        if (data.cards) db = data.cards;
-        persist(false); persistDb();
-        toast('Backup restaurado.');
-        location.hash = '#/decks';
-        render();
-      } catch (er) { toast('Esse arquivo não é um backup do Playset.'); }
-    };
+    reader.onload = function () { restoreFromText(reader.result); input.value = ''; };
+    reader.onerror = function () { setBackupMsg('Não consegui abrir esse arquivo.', 'Não consegui abrir o arquivo.', false); input.value = ''; };
     reader.readAsText(f);
   });
-
-  function sendBackup() {
-    var now = Date.now();
-    var json = JSON.stringify({ app: 'falta-uma', version: 1, savedAt: now, state: state, cards: db });
-    var d = new Date(now);
-    var fname = 'playset-backup-' + d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + '.json';
-    var file = null;
-    try { file = new File([json], fname, { type: 'application/json' }); } catch (e) {}
-    var done = function () { state.lastBackup = now; persist(false); render(); toast('Backup pronto.'); };
-    if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
-      navigator.share({ files: [file], title: 'Backup Playset', text: 'Backup dos meus decks (Playset) de ' + fmtDate(now) }).then(done).catch(function () {});
-    } else {
-      var a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
-      a.download = fname;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      done();
-      toast('Arquivo baixado. Anexe num e-mail para você.');
-    }
-  }
 
   function loadExamples() {
     var ug = addDeck('UG Madness (exemplo)', 'Premodern',
