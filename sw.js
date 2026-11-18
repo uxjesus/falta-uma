@@ -1,7 +1,8 @@
 /* Playset — funciona offline. Troque VERSION a cada publicação. */
-var VERSION = 'fu-v0.17.1';
+var VERSION = 'fu-v0.17.2';
 var SHELL = ['./', 'index.html', 'logic.js', 'app.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 var IMG_CACHE = 'fu-img-v1';
+var SHARE_CACHE = 'fu-share';
 var IMG_MAX = 400;
 
 self.addEventListener('install', function (e) {
@@ -10,7 +11,7 @@ self.addEventListener('install', function (e) {
 
 self.addEventListener('activate', function (e) {
   e.waitUntil(caches.keys().then(function (keys) {
-    return Promise.all(keys.filter(function (k) { return k !== VERSION && k !== IMG_CACHE; }).map(function (k) { return caches.delete(k); }));
+    return Promise.all(keys.filter(function (k) { return k !== VERSION && k !== IMG_CACHE && k !== SHARE_CACHE; }).map(function (k) { return caches.delete(k); }));
   }).then(function () { return self.clients.claim(); }));
 });
 
@@ -22,8 +23,21 @@ function trim(cache) {
 
 self.addEventListener('fetch', function (e) {
   var req = e.request;
-  if (req.method !== 'GET') return;
   var url = new URL(req.url);
+
+  // Arquivo recebido pelo Compartilhar do celular: guarda o texto e abre o app para importar
+  if (req.method === 'POST' && /\/share-target$/.test(url.pathname)) {
+    e.respondWith(req.formData().then(function (fd) {
+      var f = fd.get('backup');
+      return (f && f.text ? f.text() : Promise.resolve('')).then(function (text) {
+        return caches.open(SHARE_CACHE).then(function (c) { return c.put('share-inbox', new Response(text)); });
+      });
+    }).catch(function () {}).then(function () {
+      return Response.redirect(new URL('./?shared=1', self.registration.scope).href, 303);
+    }));
+    return;
+  }
+  if (req.method !== 'GET') return;
 
   // Imagens das cartas: guarda depois da primeira vez (aparecem sem internet)
   if (url.hostname === 'cards.scryfall.io' || url.hostname === 'svgs.scryfall.io') {

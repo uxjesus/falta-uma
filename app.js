@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.17.1';
+  var APP_VERSION = '0.17.2';
   var SNAP_KEY = 'fu.snap.v1';
   var VER_KEY = 'fu.appver';
 
@@ -1333,13 +1333,13 @@
       '<button class="btn full" data-act="friend">Ver o que eu tenho</button></section><div id="friendOut" aria-live="polite"></div>' +
       '<section class="card pad stack" aria-labelledby="bk"><h2 id="bk" style="font-size:1.0625rem">Backup dos seus decks</h2>' +
       (nag ? '<p class="small" style="color:var(--miss);font-weight:700">' + (state.lastBackup ? 'Seu último backup está desatualizado.' : 'Você ainda não fez backup.') + '</p>' : '') +
-      '<p class="muted small">Guarda seus decks e o que você marcou como \"tenho\" fora do celular. Toque em \"Enviar backup\" e escolha o WhatsApp, o Telegram ou outro app. Mande para você mesmo (no WhatsApp, a conversa com o seu próprio número) e não apague a mensagem.</p>' +
+      '<p class="muted small">Guarda seus decks e o que você marcou como \"tenho\" fora do celular. Toque em \"Enviar backup\" e escolha o WhatsApp. Mande para você mesmo (a conversa com o seu próprio número). Vai um arquivo com as instruções de como voltar. Não apague. Para voltar: toque no arquivo no WhatsApp, Compartilhar, Playset.</p>' +
       '<p class="small">Último backup: <strong>' + (fmtDate(state.lastBackup) || 'nenhum') + '</strong></p>' +
       '<p class="small" id="bkStatus" role="status" aria-live="polite">' + (backupMsg ? '<strong>' + esc(backupMsg) + '</strong>' : '') + '</p>' +
       '<button class="btn primary full" data-act="backup">Enviar backup (WhatsApp, Telegram…)</button>' +
       '<button class="btn full" data-act="backupcopy">Copiar o backup como texto</button>' +
       '<h3 style="font-size:1rem;margin-top:12px">Voltar um backup</h3>' +
-      '<p class="muted small">Abra a mensagem do backup, copie o texto inteiro e cole aqui. Antes de importar, guardo uma cópia do que está no app agora.</p>' +
+      '<p class="muted small">Se preferir colar: abra a mensagem do backup, copie o texto inteiro e cole aqui. Antes de importar, guardo uma cópia do que está no app agora.</p>' +
       '<label for="bkText" class="small">Cole aqui a mensagem do backup</label>' +
       '<textarea id="bkText" spellcheck="false" autocapitalize="off" style="min-height:96px"></textarea>' +
       '<button class="btn full" data-act="importtext">Importar do texto</button>' +
@@ -2396,7 +2396,7 @@
   function backupMessage(now) {
     var json = backupJson(now);
     return gzipToB64(json).then(function (code) {
-      var head = 'Backup do Playset de ' + fmtDate(now) + '\nGuarde esta mensagem. Para voltar: Mais > Importar do texto, e cole a mensagem inteira.\n\n';
+      var head = 'Backup do Playset de ' + fmtDate(now) + '\nGuarde isto. Para voltar: compartilhe este arquivo com o Playset, ou em Mais > Importar do texto cole tudo.\n\n';
       return head + (code ? 'PLAYSET1:' + code + ':FIM' : json);
     });
   }
@@ -2422,20 +2422,44 @@
     });
   }
 
-  /* Enviar: abre o compartilhar do celular com o backup como texto. Se não der, copia o texto. */
+  /* Enviar: compartilha o backup como ANEXO (aparece como um cartão de arquivo no WhatsApp, sem paredão de texto).
+     Nada é baixado no celular. Se o aparelho recusar o anexo, cai no texto; se recusar tudo, copia. */
+  function backupFileName(now) {
+    var d = new Date(now), p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return 'Playset-backup-' + p(d.getDate()) + '-' + p(d.getMonth() + 1) + '.txt';
+  }
+  function sendBackupText(now, msg, why) {
+    if (!navigator.share || msg.length > BACKUP_MAX_CHARS) { copyBackup(now); return; }
+    var p;
+    try { p = navigator.share({ title: 'Backup Playset', text: msg }); }
+    catch (e) { copyBackup(now); return; }
+    p.then(function () {
+      markBackup(now);
+      setBackupMsg('Compartilhei o backup como texto' + (why ? ' (o anexo não funcionou: ' + why + ')' : '') + '. Confira se chegou e não apague.', 'Backup compartilhado.', true);
+    }).catch(function (err) {
+      if (err && err.name === 'AbortError') { setBackupMsg('Você fechou a lista de apps antes de enviar. O backup não foi salvo.', 'Backup não enviado.', false); return; }
+      copyBackup(now);
+    });
+  }
   function sendBackup() {
     var now = Date.now();
     backupMessage(now).then(function (msg) {
-      if (!navigator.share || msg.length > BACKUP_MAX_CHARS) { copyBackup(now); return; }
+      var file = null;
+      try { file = new File([msg], backupFileName(now), { type: 'text/plain' }); } catch (e) {}
+      var canFile = file && navigator.share && navigator.canShare && navigator.canShare({ files: [file] });
+      if (!canFile) { sendBackupText(now, msg, file && navigator.share ? 'este celular não aceita anexo' : ''); return; }
+      var note = 'Este é o seu backup do Playset de ' + fmtDate(now) + '. Não apague este arquivo nem esta conversa.\n\n' +
+        'Para voltar os decks: toque no arquivo aqui no WhatsApp, escolha Compartilhar e depois Playset. ' +
+        'O app pergunta se quer importar. Não precisa baixar nada.';
       var p;
-      try { p = navigator.share({ title: 'Backup Playset', text: msg }); }
-      catch (e) { copyBackup(now); return; }
+      try { p = navigator.share({ files: [file], title: 'Backup Playset', text: note }); }
+      catch (e) { sendBackupText(now, msg, e && e.name); return; }
       p.then(function () {
         markBackup(now);
-        setBackupMsg('Compartilhei o backup. Confira se a mensagem chegou onde você mandou e não apague.', 'Backup compartilhado.', true);
+        setBackupMsg('Enviei o backup como arquivo. Confira se chegou na conversa e não apague.', 'Backup enviado.', true);
       }).catch(function (err) {
         if (err && err.name === 'AbortError') { setBackupMsg('Você fechou a lista de apps antes de enviar. O backup não foi salvo.', 'Backup não enviado.', false); return; }
-        copyBackup(now);
+        sendBackupText(now, msg, (err && err.name) || 'erro desconhecido');
       });
     });
   }
@@ -2542,4 +2566,17 @@
     try { navigator.serviceWorker.register('sw.js').catch(function () {}); } catch (e) {}
   }
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+
+  /* Arquivo recebido pelo Compartilhar do celular (WhatsApp > arquivo > Compartilhar > Playset): o service worker guardou o texto. */
+  if (/[?&]shared=1/.test(location.search) && window.caches) {
+    caches.open('fu-share').then(function (c) {
+      return c.match('share-inbox').then(function (res) {
+        try { history.replaceState(null, '', location.pathname + '#/mais'); } catch (e) {}
+        if (!res) { location.hash = '#/mais'; setBackupMsg('Não recebi nenhum arquivo. Tente compartilhar de novo.', 'Sem arquivo.', true); return; }
+        return res.text().then(function (text) {
+          return c.delete('share-inbox').then(function () { location.hash = '#/mais'; return restoreFromText(text); });
+        });
+      });
+    }).catch(function () { setBackupMsg('Não consegui ler o arquivo compartilhado.', 'Erro ao ler o arquivo.', true); });
+  }
 })();
