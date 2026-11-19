@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.18.0';
+  var APP_VERSION = '0.19.0';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -809,6 +809,14 @@
       o.map(function (x) { return '<option value="' + x[0] + '"' + (state.ui.sort === x[0] ? ' selected' : '') + '>' + x[1] + '</option>'; }).join('') + '</select>';
   }
 
+  /* Selos do deck: sempre ícone + palavra (nunca só cor). */
+  function sealsHtml(d) {
+    var out = '';
+    if (d.pinned) out += '<span class="seal pin">' + ICO.pin + 'Fixado</span>';
+    if (FU.deckComplete(d)) out += '<span class="seal ok">' + ICO.check + 'Completo</span>';
+    return out ? '<span class="seals">' + out + '</span>' : '';
+  }
+
   function viewDecks() {
     fab.innerHTML = '';
     barAction.innerHTML = '<a class="ib" href="#/novo" aria-label="Novo deck">' + ICON.plus + '</a>';
@@ -819,7 +827,7 @@
     var html = '<header class="head"><h1>Decks</h1><p class="metaline">' + (function () { var nl = state.decks.filter(function (x) { return x.format === 'Lista'; }).length, nd = state.decks.length - nl; return nd + (nd === 1 ? ' deck' : ' decks') + (nl ? ' · ' + nl + (nl === 1 ? ' lista' : ' listas') : ''); })() + '</p></header>';
     var fl = formats();
     fl.forEach(function (fm) {
-    var inF = state.decks.filter(function (d) { return fmtOf(d) === fm; });
+    var inF = FU.sortDecks(state.decks.filter(function (d) { return fmtOf(d) === fm; }));
     if (fl.length > 1) html += '<h2 class="sec-h fmt-h">' + esc(fm === 'Lista' ? 'Listas' : fm) + ' <span class="c">(' + inF.length + ')</span></h2>';
     html += '<ul class="decklist">';
     inF.forEach(function (d) {
@@ -830,7 +838,7 @@
       html += '<li><a class="dk" href="#/deck/' + esc(d.id) + '"><div class="art" style="' + (f ? '' : phStyle({ colors: deckColors(d) })) + '">' +
         (f ? '<img src="' + esc(artOf(f)) + '" alt="" loading="lazy" decoding="async">' : '') +
         '<span class="badge">' + esc(d.format || 'Sem formato') + '</span>' + pipsHtml(deckColors(d)) + '</div>' +
-        '<div class="body"><strong>' + esc(d.name) + '</strong>' +
+        '<div class="body"><strong>' + esc(d.name) + '</strong>' + sealsHtml(d) +
         '<div class="ln"><span>' + (d.cards.length ? p.pct + '% pronto · ' + (miss ? 'faltam ' + miss : 'completo') : (d.format === 'Lista' ? 'Lista vazia' : 'Sem cartas · ' + ((d.sources || []).length || 0) + ' fontes na pesquisa')) + '</span><span>' + (mv ? '≈ ' + brl0.format(mv) : '') + '</span></div>' +
         '<div class="bar" aria-hidden="true"><span style="width:' + p.pct + '%"></span></div></div></a></li>';
     });
@@ -1099,9 +1107,10 @@
 
     var html = '<section class="banner" style="' + (f ? '' : phStyle({ colors: deckColors(d) })) + '">' +
       (f ? '<img class="art" src="' + esc(artOf(f)) + '" alt="" decoding="async">' : '') + '<span class="shade"></span>' +
-      '<div class="info"><a href="#/decks" class="back">' + ICON.back + 'Decks</a>' +
+      '<div class="info"><div class="toprow"><a href="#/decks" class="back">' + ICON.back + 'Decks</a>' +
+        (d.format === 'Lista' ? '' : '<button class="pinbtn" data-pin="' + esc(d.id) + '" aria-pressed="' + (d.pinned ? 'true' : 'false') + '">' + ICO.pin + (d.pinned ? 'Fixado' : 'Fixar') + '</button>') + '</div>' +
       '<h1>' + esc(d.name) + '</h1>' +
-      '<p style="display:flex;gap:8px;align-items:center"><span class="badge">' + esc(d.format || 'Sem formato') + '</span>' + pipsHtml(deckColors(d)) + '</p>' +
+      '<p style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="badge">' + esc(d.format || 'Sem formato') + '</span>' + pipsHtml(deckColors(d)) + (FU.deckComplete(d) ? '<span class="seal ok on-art">' + ICO.check + 'Completo</span>' : '') + '</p>' +
       (d.cards.length ? '<p class="metaline"><span><strong>' + p.pct + '%</strong> pronto</span><span>' + total + ' cartas</span>' +
         (miss ? '<span>faltam <strong>' + miss + '</strong>' + (missV ? ' · ≈ ' + brl0.format(missV) : '') + '</span>' : '<span>completo</span>') + '</p>' +
         '<div class="meter" aria-hidden="true"><span style="width:' + p.pct + '%"></span></div>' : '<p class="metaline"><span>' + (d.format === 'Lista' ? 'Sem cartas ainda. Busque abaixo.' : 'Sem cartas ainda. Monte pela Pesquisa.') + '</span></p>') +
@@ -1303,6 +1312,9 @@
       '<div><label for="df">Tipo</label><select id="df" class="field">' + formats.map(function (f) { return '<option value="' + f[0] + '"' + (cur === f[0] ? ' selected' : '') + '>' + f[1] + '</option>'; }).join('') + '</select></div>' +
       '<div><label for="dl">Lista <span class="muted">(opcional: dá para montar pela Pesquisa)</span></label><p class="small muted" id="dlh" style="margin:0 0 8px">Cole do Moxfield, Archidekt, MTG Goldfish, Arena ou WhatsApp. Uma carta por linha, ex.: 4 Counterspell. Sideboard depois de uma linha "Sideboard".' + (d ? ' O que você já marcou como "tenho" continua marcado.' : '') + '</p>' +
       '<textarea id="dl" aria-describedby="dlh" spellcheck="false" autocapitalize="off">' + (d ? esc(FU.toText(d.cards)) : '') + '</textarea></div>' +
+      '<div class="chk"><input type="checkbox" id="dm"' + (state.ui.markAll === false ? '' : ' checked') + '><label for="dm">Marcar todas as cartas da lista como "tenho"</label></div>' +
+      '<p class="small muted" style="margin:-4px 0 0">Só marca, nunca desmarca. Desligue se colar a lista de outra pessoa.</p>' +
+      '<button class="btn full" type="button" data-photo="' + (d ? esc(d.id) : 'novo') + '">' + ICO.cam + 'Importar por foto em vez de colar</button>' +
       '<p id="formErr" class="err" role="alert"></p>' +
       '<button class="btn primary full" type="submit">' + (d ? 'Salvar alterações' : 'Salvar deck') + '</button>' +
       (d ? '<button class="btn full" type="button" data-act="deleteDeck" data-id="' + esc(d.id) + '" style="color:var(--miss);border-color:var(--miss)">Excluir ' + (isList ? 'lista' : 'deck') + '</button>' : '') +
@@ -1699,6 +1711,8 @@
   }
 
   /* ---------- importar por foto: a IA da pessoa lê a foto, o app lê a resposta ---------- */
+  ICO.pin = svg('<path d="M9 3h6l-1 6 3 3v2H7v-2l3-3z"/><path d="M12 14v7"/>');
+  ICO.check = svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 2.8);
   ICO.cam = svg('<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>');
   var photo = null;
   var AIS = [['claude', 'Claude', 'https://claude.ai/new?q='], ['chatgpt', 'ChatGPT', 'https://chatgpt.com/?q='], ['gemini', 'Gemini', 'https://gemini.google.com/app']];
@@ -1917,6 +1931,7 @@
       '<label for="ptarget" class="visually-hidden">Destino</label><select id="ptarget" class="field">' + opts + '</select>' +
       (photo.target === 'novo' ? '<div style="display:grid;gap:8px;margin-top:8px"><label for="pname" class="visually-hidden">Nome do deck</label><input type="text" id="pname" autocomplete="off" placeholder="Nome do deck, ex.: UW Control" value="' + esc(photo.name) + '">' +
         '<label for="pfmt" class="visually-hidden">Formato</label><select id="pfmt" class="field">' + fmts.map(function (f) { return '<option' + (photo.format === f ? ' selected' : '') + '>' + f + '</option>'; }).join('') + '</select></div>' : '') +
+      '<p class="small" style="margin-top:8px"><strong>Dica para a foto sair boa:</strong> abra as cartas em leque (sem empilhar) e fotografe 8 a 10 por vez, com luz boa e sem reflexo.</p>' +
       '<p class="xs muted" style="margin-top:8px">As cartas entram marcadas como “tenho”. ' + (photo.target === 'colecao' ? 'Ficam na Coleção, fora de qualquer deck.' : 'Se a foto tiver mais cópias do que o deck pede, as que sobram vão para a Coleção.') + '</p></section>' +
       '<section aria-labelledby="p2"><h2 id="p2" class="ph-h"><span aria-hidden="true">2</span>Peça a lista para a sua IA</h2>' +
       '<p class="small muted">Eu copio um prompt pronto. Abra a IA que você usa, cole o prompt e mande a foto do deck ou das cartas na mesma conversa.</p>' +
@@ -2218,6 +2233,11 @@
       return;
     }
     if (t.hasAttribute('data-onlymiss')) { state.ui.onlyMiss = !state.ui.onlyMiss; persist(false); render(); keepFocus('[data-onlymiss]'); return; }
+    if (t.hasAttribute('data-pin')) {
+      var pd = deckById(t.getAttribute('data-pin')); if (!pd) return;
+      pd.pinned = !pd.pinned; persist(true); render(); keepFocus('[data-pin]');
+      toast(pd.pinned ? 'Deck fixado no topo.' : 'Deck desafixado.'); return;
+    }
     if (t.hasAttribute('data-photo')) { location.hash = '#/foto/' + t.getAttribute('data-photo'); return; }
     if (t.hasAttribute('data-ctab')) { state.ui.colTab = t.getAttribute('data-ctab'); persist(false); render(); keepFocus('[data-ctab="' + state.ui.colTab + '"]'); return; }
     if (t.hasAttribute('data-pcopy')) { copyText(photoPrompt(), 'Prompt copiado. Cole na sua IA e mande a foto.'); return; }
@@ -2331,6 +2351,8 @@
     var parsed = FU.parseList(text);
     if (text.trim() && !parsed.cards.length) { err.textContent = 'Não encontrei cartas na lista. Use uma carta por linha, ex.: 4 Counterspell.'; document.getElementById('dl').focus(); return; }
     var deck;
+    var markAll = !!(document.getElementById('dm') && document.getElementById('dm').checked) && !!text.trim();
+    if (document.getElementById('dm')) state.ui.markAll = document.getElementById('dm').checked;
     if (id) {
       deck = deckById(id);
       deck.name = name; deck.format = format;
@@ -2344,11 +2366,14 @@
         if (lost > 0) { var src = deck.cards.filter(function (c) { return FU.key(canonical(c.name)) === k; }); putSpare(src[0] ? src[0].name : (cardInfo(k) || { name: k }).name, lost, FU.edsPop(beforeEds[k], before[k], lost).removed); }
       });
       deck.cards.forEach(function (c) { if ((c.owned || 0) < c.qty) { var tk2 = takeSpareEds(c.name, c.qty - (c.owned || 0)); c.owned = (c.owned || 0) + tk2.n; c.eds = FU.edsMerge(c.eds, tk2.eds); } });
+      if (markAll) FU.markAllOwned(deck.cards);
       persist(true);
     } else {
       deck = addDeck(name, format, text).deck;
       if (!deck.cards.length && format !== 'Lista') state.ui.view[deck.id + ':tab'] = 'research';
       deck.cards.forEach(function (c) { var tk3 = takeSpareEds(c.name, c.qty); c.owned = tk3.n; c.eds = tk3.eds; });
+      if (markAll) FU.markAllOwned(deck.cards);
+      persist(true);
     }
     location.hash = '#/deck/' + deck.id;
     toast((format === 'Lista' ? (id ? 'Lista atualizada.' : 'Lista salva.') : (id ? 'Deck atualizado.' : 'Deck salvo.')) + (parsed.skipped.length ? ' Ignorei ' + parsed.skipped.length + ' linha(s) que não eram cartas.' : ''));

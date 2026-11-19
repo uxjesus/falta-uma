@@ -113,6 +113,36 @@
     return { need: need, have: have, pct: need ? Math.round((have / need) * 100) : 100 };
   }
 
+
+  /* Selo "Completo": só Premodern e Commander; listas avulsas nunca têm selo.
+     Premodern: principal com 60+, sideboard com exatamente 15, tudo marcado como "tenho".
+     Commander: 100 cartas (comandante incluso), tudo marcado como "tenho". Terreno básico não conta como posse. */
+  function deckComplete(d) {
+    if (!d || !d.cards || !d.cards.length) return false;
+    var fmt = d.format, main = 0, side = 0;
+    d.cards.forEach(function (c) { if (c.board === 'maybe') return; if (c.board === 'side') side += c.qty; else main += c.qty; });
+    if (fmt === 'Premodern') { if (main < 60 || side !== 15) return false; }
+    else if (fmt === 'Commander') { if (main + side !== 100) return false; }
+    else return false;
+    return d.cards.every(function (c) { return c.board === 'maybe' || isBasic(c.name) || (c.owned || 0) >= c.qty; });
+  }
+
+  /* Marca como "tenho" todas as cartas do deck (só marca, nunca desmarca). */
+  function markAllOwned(cards) {
+    (cards || []).forEach(function (c) { if (c.board !== 'maybe' && (c.owned || 0) < c.qty) c.owned = c.qty; });
+    return cards;
+  }
+
+  /* Ordem da lista de decks: fixados primeiro; depois decks com cartas antes dos vazios; resto na ordem de criação. */
+  function sortDecks(decks) {
+    return decks.map(function (d, i) { return { d: d, i: i }; }).sort(function (a, b) {
+      var pa = a.d.pinned ? 0 : 1, pb = b.d.pinned ? 0 : 1;
+      if (pa !== pb) return pa - pb;
+      var ea = (a.d.cards && a.d.cards.length) ? 0 : 1, eb = (b.d.cards && b.d.cards.length) ? 0 : 1;
+      return ea - eb || a.i - b.i;
+    }).map(function (x) { return x.d; });
+  }
+
   function toLigaMagic(items) {
     return items.map(function (i) { return i.total + ' ' + i.name; }).join('\n');
   }
@@ -426,7 +456,7 @@
     splitSource: splitSource, markOwned: markOwned,
     consensus: consensus, buildIndex: buildIndex, matchName: matchName, resolveName: resolveName, cleanOcr: cleanOcr, norm: norm,
     typeGroup: typeGroup, GROUP_ORDER: GROUP_ORDER, parseMana: parseMana, toText: toText, mergeOwned: mergeOwned,
-    parseList: parseList, aggregateMissing: aggregateMissing, deckProgress: deckProgress,
+    parseList: parseList, aggregateMissing: aggregateMissing, deckProgress: deckProgress, deckComplete: deckComplete, markAllOwned: markAllOwned, sortDecks: sortDecks,
     toLigaMagic: toLigaMagic, isBasic: isBasic, key: key, missingOf: missingOf,
     matchFriendList: matchFriendList, ownedTotals: ownedTotals
   };

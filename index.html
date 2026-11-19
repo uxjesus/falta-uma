@@ -384,6 +384,20 @@ a.lg .icon{width:20px;height:20px}
 .copies .cp img{width:72px;height:auto;aspect-ratio:488/680;border-radius:4.75%/3.5%;display:block;background:var(--surface-2)}
 .copies .cph{display:flex;width:72px;aspect-ratio:488/680;align-items:center;justify-content:center;border-radius:6px;background:var(--surface-2);font-weight:800;font-size:.8125rem}
 .copies .cl{font-size:.9375rem}
+
+/* v0.19: selos (ícone + palavra, nunca só cor), fixar deck, opção marcar todas */
+.seals{display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 2px}
+.seal{display:inline-flex;align-items:center;gap:4px;min-height:24px;padding:0 8px;border-radius:4px;font-size:.75rem;font-weight:800;border:1.5px solid currentColor;line-height:1}
+.seal .icon{width:14px;height:14px}
+.seal.ok{color:var(--ok)} .seal.pin{color:var(--accent)}
+.seal.ok.on-art{background:rgba(10,10,12,.82);color:#86d9a0;border-color:#86d9a0}
+.banner .toprow{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.pinbtn{display:inline-flex;align-items:center;gap:6px;min-height:var(--tap);padding:0 14px;border-radius:var(--r-pill);border:1.5px solid #fff;background:rgba(10,10,12,.82);color:#fff;font-weight:800;font-size:.9375rem;cursor:pointer}
+.pinbtn[aria-pressed="true"]{background:#f2c75c;color:#1f1600;border-color:#f2c75c}
+.pinbtn .icon{width:18px;height:18px}
+.chk{display:flex;align-items:center;gap:12px;min-height:var(--tap)}
+.chk input{width:24px;height:24px;flex:none;accent-color:var(--accent)}
+.chk label{font-weight:700;margin:0}
 </style>
 </head>
 <body>
