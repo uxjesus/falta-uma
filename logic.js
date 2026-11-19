@@ -143,6 +143,40 @@
     }).map(function (x) { return x.d; });
   }
 
+
+  /* Cartas-destaque para o fundo da home: as que "fazem o deck ser o deck".
+     Fora: terrenos, básicos, cartas muito comuns (staples) e cartas que aparecem em 3+ decks do Érick.
+     Pontua por: capa escolhida (sempre entra), cópias no deck, raridade entre os decks dele e preço. Máx. 3 por deck. */
+  var STAPLES = ['counterspell', 'brainstorm', 'ponder', 'swords to plowshares', 'path to exile', 'lightning bolt', 'force of will', 'mana drain',
+    'sol ring', 'wasteland', 'dark ritual', 'duress', 'mana leak', 'disenchant', 'preordain', 'opt', 'consider', 'mental misstep', 'daze', 'spell pierce',
+    'abrupt decay', 'fatal push', 'thoughtseize', 'llanowar elves', 'birds of paradise', 'arcane signet', 'command tower', 'fellwar stone', 'mind stone'];
+  function heroPool(decks, infoOf, usdOf, limit) {
+    var real = (decks || []).filter(function (d) { return d.format !== 'Lista' && d.cards && d.cards.length; });
+    var spread = {};
+    real.forEach(function (d) { var seen = {}; d.cards.forEach(function (c) { var k = key(c.name); if (!seen[k]) { seen[k] = 1; spread[k] = (spread[k] || 0) + 1; } }); });
+    var all = [];
+    real.forEach(function (d) {
+      var mine = [], cov = d.cover ? infoOf(d.cover) : null;
+      if (cov && cov.art) mine.push({ name: cov.name || d.cover, art: cov.art, deck: d.name, deckId: d.id, score: 100 });
+      d.cards.forEach(function (c) {
+        if (c.board === 'side' || c.board === 'maybe' || isBasic(c.name)) return;
+        var k = key(c.name), i = infoOf(c.name);
+        if (!i || !i.art || /land/i.test(i.typeLine || '')) return;
+        if (STAPLES.indexOf(k) >= 0 || (spread[k] || 1) >= 3) return;
+        var usd = usdOf(i) || 0;
+        var score = (c.board === 'commander' ? 6 : 0) + (c.qty >= 4 ? 3 : c.qty >= 3 ? 2 : c.qty >= 2 ? 1 : 0.5) + 2 / (spread[k] || 1) + Math.min(4, Math.log(1 + usd) / Math.LN10 * 2);
+        mine.push({ name: i.name || c.name, art: i.art, deck: d.name, deckId: d.id, score: score });
+      });
+      mine.sort(function (a, b) { return b.score - a.score; });
+      var got = {}, n = 0;
+      mine.forEach(function (m) { if (n >= 3 || got[key(m.name)]) return; got[key(m.name)] = 1; n++; all.push(m); });
+    });
+    all.sort(function (a, b) { return b.score - a.score; });
+    var out = [], seenN = {};
+    all.forEach(function (m) { var k = key(m.name); if (seenN[k] || out.length >= (limit || 12)) return; seenN[k] = 1; out.push(m); });
+    return out;
+  }
+
   function toLigaMagic(items) {
     return items.map(function (i) { return i.total + ' ' + i.name; }).join('\n');
   }
@@ -456,7 +490,7 @@
     splitSource: splitSource, markOwned: markOwned,
     consensus: consensus, buildIndex: buildIndex, matchName: matchName, resolveName: resolveName, cleanOcr: cleanOcr, norm: norm,
     typeGroup: typeGroup, GROUP_ORDER: GROUP_ORDER, parseMana: parseMana, toText: toText, mergeOwned: mergeOwned,
-    parseList: parseList, aggregateMissing: aggregateMissing, deckProgress: deckProgress, deckComplete: deckComplete, markAllOwned: markAllOwned, sortDecks: sortDecks,
+    parseList: parseList, aggregateMissing: aggregateMissing, deckProgress: deckProgress, deckComplete: deckComplete, heroPool: heroPool, markAllOwned: markAllOwned, sortDecks: sortDecks,
     toLigaMagic: toLigaMagic, isBasic: isBasic, key: key, missingOf: missingOf,
     matchFriendList: matchFriendList, ownedTotals: ownedTotals
   };

@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.19.0';
+  var APP_VERSION = '0.20.0';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -1023,11 +1023,35 @@
     for (var i = 0; i < list.length; i++) { var f = featured(list[i]); if (f) return artOf(f); }
     return null;
   }
+  /* Faixa da home: troca sozinha entre as cartas-símbolo dos decks (as que "fazem o deck ser o deck" e as mais caras).
+     Só troca com internet e sem "reduzir movimento"; sem internet, fica na carta atual. */
+  var heroTimer = null, heroList = [], heroAt = 0;
   function heroHtml() {
-    var a = heroArt();
-    return '<section class="hero">' + (a ? '<img class="art" src="' + esc(a) + '" alt="" decoding="async">' : '') + '<span class="shade" aria-hidden="true"></span>' +
+    heroList = FU.heroPool(scopeDecks(), cardInfo, unitUsd, 12);
+    var a = null, cap = '';
+    if (heroList.length) { heroAt = Math.floor(Math.random() * heroList.length); a = heroList[heroAt].art; cap = heroList[heroAt].name + ' · ' + heroList[heroAt].deck; }
+    else a = heroArt();
+    return '<section class="hero">' + (a ? '<img class="art on" id="heroA" src="' + esc(a) + '" alt="" decoding="async">' : '') + '<img class="art" id="heroB" alt="" decoding="async">' + '<span class="shade" aria-hidden="true"></span>' +
       '<div class="info"><p class="wordmark"><img src="icons/icon-192.png" alt="" width="40" height="40">Playset</p>' +
-      '<p class="tagline">A wantlist dos seus decks</p></div></section>';
+      '<p class="tagline">A wantlist dos seus decks</p>' + (cap ? '<p class="hero-cap" id="heroCap">Arte: ' + esc(cap) + '</p>' : '') + '</div></section>';
+  }
+  function heroStep() {
+    var a = document.getElementById('heroA'), b = document.getElementById('heroB');
+    if (!a || !b || heroList.length < 2) { clearInterval(heroTimer); heroTimer = null; return; }
+    if (!navigator.onLine) return;
+    var next = (heroAt + 1) % heroList.length, h = heroList[next], front = b.classList.contains('on') ? b : a, back = front === a ? b : a;
+    back.onload = function () {
+      back.onload = null; heroAt = next; back.classList.add('on'); front.classList.remove('on');
+      var cap = document.getElementById('heroCap'); if (cap) cap.textContent = 'Arte: ' + h.name + ' · ' + h.deck;
+    };
+    back.onerror = function () { back.onerror = null; heroAt = next; };
+    back.src = h.art;
+  }
+  function heroStart() {
+    clearInterval(heroTimer); heroTimer = null;
+    if (!document.getElementById('heroB') || heroList.length < 2) return;
+    var calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!calm) heroTimer = setInterval(heroStep, 12000);
   }
   function viewFalta() {
     var ui = state.ui;
@@ -2116,6 +2140,7 @@
     else if (r.name === 'precos') main.innerHTML = viewPrecos();
     else if (r.name === 'troca') main.innerHTML = viewTroca();
     else main.innerHTML = viewFalta();
+    heroStart();
   }
   var lastRoute = null;
   function onRoute() {
