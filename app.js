@@ -2184,8 +2184,10 @@
       '<button type="button" class="btn primary full" data-mcopy style="margin-top:8px"' + (prem.length ? '' : ' disabled') + '>' + ICON.copy + 'Copiar pedido</button>' +
       '<div class="aibtns">' + AIS.map(function (a) { return '<button type="button" class="btn" data-mai="' + a[0] + '"' + (prem.length ? '' : ' disabled') + '>Copiar e abrir ' + a[1] + '</button>'; }).join('') + '</div>' +
       (noArch.length ? '<p class="xs err" style="margin-top:8px">Falta escolher o arquétipo de ' + noArch.length + (noArch.length === 1 ? ' deck' : ' decks') + '. Eles ficam de fora do pedido.</p>' : '') + '</section>' +
-      '<section aria-labelledby="m2"><h2 id="m2" class="ph-h"><span aria-hidden="true">2</span>Cole a resposta aqui</h2>' +
-      '<p class="small muted">Se a IA gerar um link do Playset, é só tocar nele. Se não, copie o bloco que ela mandar e cole abaixo.</p>' +
+      '<section aria-labelledby="m2"><h2 id="m2" class="ph-h"><span aria-hidden="true">2</span>Cole a resposta ou a tabela aqui</h2>' +
+      '<p class="small muted">Cole o bloco que a IA mandou. Se a IA não conseguiu abrir alguma página, abra você a página do deck em mtgdecks.net/Premodern no Chrome, copie a tabela de winrates e cole abaixo: o app lê sozinho.</p>' +
+      '<label for="march" class="small" style="display:block;margin-top:8px"><strong>Se for a tabela de uma página do site, de qual deck ela é?</strong></label>' +
+      '<select id="march" class="field" style="margin-top:4px"><option value="">Escolher…</option>' + FU.META_ARCHS.map(function (a) { return '<option' + (metaUi.arch === a ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') + '</select>' +
       '<label for="mtext" class="visually-hidden">Resposta da IA</label><textarea id="mtext" spellcheck="false" autocapitalize="off" placeholder="PLAYSET-META v1&#10;fonte: MTG Decks&#10;data: 2026-11-19&#10;deck: Burn&#10;Stiflenought|26|50" style="margin-top:8px">' + esc(metaUi.text) + '</textarea>' +
       '<p id="mErr" class="err" role="alert" style="margin-top:8px">' + esc(metaUi.err) + '</p>' +
       '<button type="button" class="btn primary full" data-mread style="margin-top:8px">Ler dados</button></section>' +
@@ -2198,7 +2200,8 @@
     return '<div class="form" style="gap:12px"><p class="small">Li <strong>' + p.rows + (p.rows === 1 ? ' linha' : ' linhas') + '</strong> de <strong>' + ks.length + (ks.length === 1 ? ' deck' : ' decks') + '</strong>' +
       (p.skipped.length ? ' e ignorei ' + p.skipped.length + (p.skipped.length === 1 ? ' linha' : ' linhas') + ' que não entendi' : '') + '.</p>' +
       '<ul class="small" style="padding-left:20px">' + ks.map(function (k) { return '<li><strong>' + esc(k) + '</strong>: ' + p.decks[k].length + ' adversários, ' + p.decks[k].filter(function (r) { return r.n >= FU.META_MIN; }).length + ' com ' + FU.META_MIN + '+ partidas</li>'; }).join('') + '</ul>' +
-      '<p class="small">Data dos dados: <strong>' + esc(p.date ? metaDateText(p.date) : 'não informada (vou usar hoje, ' + metaDateText(todayStr()) + ')') + '</strong>' + (p.source ? ' · ' + esc(p.source) : '') + '</p>' +
+      '<p class="small">Data dos dados: <strong>' + esc(p.date ? metaDateText(p.date) : (p.table ? 'hoje, ' + metaDateText(todayStr()) + ' (dia em que você copiou)' : 'não informada (vou usar hoje, ' + metaDateText(todayStr()) + ')')) + '</strong>' + (p.source ? ' · ' + esc(p.source) : '') + '</p>' +
+      (p.table ? '<p class="small"><span class="chip mid">Inferência</span> A página não diz de quem é a taxa. Pelo título "Premodern ' + esc(Object.keys(p.decks)[0]) + ' winrates", entendo que é do <strong>seu deck contra o adversário</strong>. Confira: na página do adversário, o seu deck deve aparecer com a taxa invertida (100 menos o valor), com número de partidas parecido.</p>' : '') +
       (ks.some(function (k) { return !FU.META_ARCHS.some(function (a) { return FU.key(a) === FU.key(k); }); }) ? '<p class="xs muted">Há decks com nome fora da lista do app. Eles são salvos, mas só aparecem se o arquétipo do seu deck tiver o mesmo nome.</p>' : '') +
       '<button type="button" class="btn primary full" data-msave>Salvar no app</button>' +
       '<button type="button" class="btn full" data-mback>Voltar e editar o texto</button></div>';
@@ -2206,8 +2209,15 @@
   function metaRead() {
     var x = document.getElementById('mtext'); var text = x ? x.value : metaUi.text;
     metaUi.text = text;
+    var sel = document.getElementById('march'); if (sel) metaUi.arch = sel.value;
     var p = FU.parseMeta(text);
-    if (!p.rows) { metaUi.err = 'Não encontrei nenhuma linha no formato Adversário|taxa|partidas. Confira se colou o bloco inteiro.'; render(); keepFocus('#mtext'); return; }
+    if (!p.rows) {
+      var tb = FU.parseMetaTable(text), arch = metaUi.arch || tb.arch || '';
+      if (tb.rows) {
+        if (!arch) { metaUi.err = 'Isto parece a tabela de uma página do MTG Decks. Escolha de qual deck ela é, no campo logo acima.'; render(); keepFocus('#march'); return; }
+        var dk = {}; dk[arch] = tb.list;
+        metaUi.err = ''; metaUi.parsed = { date: null, source: 'MTG Decks (tabela copiada do site)', decks: dk, rows: tb.rows, skipped: tb.skipped, table: true }; render(); return;
+      } metaUi.err = 'Não encontrei nenhuma linha no formato Adversário|taxa|partidas. Confira se colou o bloco inteiro.'; render(); keepFocus('#mtext'); return; }
     metaUi.err = ''; metaUi.parsed = p; render();
   }
   function metaSave() {

@@ -553,6 +553,40 @@
     return out;
   }
 
+  /* Lê a tabela copiada de uma página de arquétipo do MTG Decks ("Archetype | Winrate | Available Matches",
+     ex.: "Tron | 100% | 2 matches"). Aceita colunas separadas por tab, barra, espaços ou uma célula por linha.
+     Não sabe de que deck é a tabela: devolve o nome só se o título "Premodern X winrates" vier junto. */
+  function parseMetaTable(text) {
+    var out = { arch: '', list: [], rows: 0, skipped: [] };
+    var t = String(text || '').replace(/\r/g, '');
+    var mh = /premodern\s+(.+?)\s+winrates/i.exec(t);
+    if (mh) out.arch = mh[1].trim().slice(0, 60);
+    var name = '', wr = null, n = null;
+    function push() {
+      if (name && wr != null && n != null && wr >= 0 && wr <= 100 && n >= 1 && n <= 100000) {
+        var dup = out.list.filter(function (r) { return key(r.o) === key(name); })[0];
+        if (dup) { if (n > dup.n) { dup.wr = wr; dup.n = n; } } else { out.list.push({ o: name.slice(0, 60), wr: wr, n: n }); out.rows++; }
+      }
+      name = ''; wr = null; n = null;
+    }
+    var reLine = /^(.+?)[\s|]+(\d+(?:[.,]\d+)?)\s*%[\s|]+(\d+)\s*(?:matches?|partidas?|jogos)?$/i;
+    t.split('\n').forEach(function (raw) {
+      var l = raw.trim();
+      if (!l) return;
+      var m = reLine.exec(l);
+      if (m) { name = m[1].trim(); wr = Math.round(parseFloat(m[2].replace(',', '.')) * 10) / 10; n = parseInt(m[3], 10); push(); return; }
+      l.split(/\t|\||\s{2,}/).forEach(function (tok) {
+        tok = tok.trim();
+        if (!tok) return;
+        var mp = /^(\d+(?:[.,]\d+)?)\s*%$/.exec(tok), mn = /^(\d+)\s*(?:matches?|partidas?|jogos)$/i.exec(tok);
+        if (mp) { wr = Math.round(parseFloat(mp[1].replace(',', '.')) * 10) / 10; if (name && n != null) push(); }
+        else if (mn) { n = parseInt(mn[1], 10); if (name && wr != null) push(); }
+        else { if (name && (wr != null || n != null)) { out.skipped.push(name); } name = tok; wr = null; n = null; }
+      });
+    });
+    return out;
+  }
+
   /* base64url com UTF-8 (para o link #/meta?d=...). */
   function b64urlDecode(s) {
     var b = String(s || '').replace(/-/g, '+').replace(/_/g, '/').replace(/[^A-Za-z0-9+/=]/g, '');
@@ -629,7 +663,7 @@
 
   var api = {
     META_MIN: META_MIN, META_SMALL: META_SMALL, META_STALE_DAYS: META_STALE_DAYS, META_ARCHS: META_ARCHS,
-    suggestArch: suggestArch, parseMeta: parseMeta, b64urlDecode: b64urlDecode, b64urlEncode: b64urlEncode,
+    suggestArch: suggestArch, parseMeta: parseMeta, parseMetaTable: parseMetaTable, b64urlDecode: b64urlDecode, b64urlEncode: b64urlEncode,
     metaEntry: metaEntry, metaSplit: metaSplit, metaAgeDays: metaAgeDays, sideNote: sideNote, noteCardStatus: noteCardStatus,
     parsePriceBR: parsePriceBR, parseLigaPrices: parseLigaPrices,
     edsSum: edsSum, edsMerge: edsMerge, edsTake: edsTake, edsPop: edsPop,
