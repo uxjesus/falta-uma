@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.21.0';
+  var APP_VERSION = '0.21.1';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -2165,7 +2165,10 @@
     return out;
   }
   function metaSave(p) {
-    meta = { fonte: p.fonte, data: p.data, at: Date.now(), decks: p.decks };
+    var old = meta && meta.decks ? meta.decks : {}, merged = {};
+    Object.keys(old).forEach(function (k) { merged[k] = old[k]; });
+    Object.keys(p.decks).forEach(function (k) { merged[k] = p.decks[k]; }); // importar de novo troca só o arquétipo que veio; os outros ficam
+    meta = { fonte: p.fonte || (meta && meta.fonte) || '', data: p.data, at: Date.now(), decks: merged };
     save(META_KEY, meta);
   }
   function b64urlDecode(s) {
