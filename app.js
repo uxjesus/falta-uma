@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.20.0';
+  var APP_VERSION = '0.21.0';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -1177,6 +1177,7 @@
       html += '<section class="sec">' + secHead(bk, 'Terrenos básicos', basics.reduce(function (s, c) { return s + c.qty; }, 0), '<span class="sum">não contam</span>') +
         (isClosed(bk) ? '' : '<ul class="rows">' + basics.map(function (c) { return '<li class="r"><span class="q">' + c.qty + '</span><span class="nm" style="cursor:default">' + esc(c.name) + (c.board === 'side' ? ' (side)' : '') + '</span><span></span><span></span></li>'; }).join('') + '</ul>') + '</section>';
     }
+    html += matchupCard(d);
     html += addCardHtml(d);
     html += '<p class="foot">' + (view === 'list' ? 'Toque no marcador à direita para dizer que tem todas (ou nenhuma). ' : '') + 'Toque numa carta para mudar a quantidade, mover para o sideboard, tirar do deck ou ajustar quantas você tem.</p>';
     return html;
@@ -1363,6 +1364,7 @@
       '<button class="btn primary full" data-act="refresh">' + ICON.refresh + 'Atualizar agora</button>' +
       '<p class="xs muted">O preço automático vem do Scryfall em dólar (mercado americano). É só uma noção. O preço que vale é o da Liga Magic, na seção abaixo.</p></section>' +
       ligaSectionHtml() +
+      metaSectionHtml() +
       '<section class="card pad stack" aria-labelledby="fr"><h2 id="fr" style="font-size:1.0625rem">Lista de um amigo</h2>' +
       '<p class="muted small">Cole a lista que ele mandou. Eu mostro quais dessas cartas você marcou que tem, nos decks, nas listas ou guardadas.</p>' +
       '<label for="fl" class="visually-hidden">Lista do amigo</label><textarea id="fl" spellcheck="false" autocapitalize="off" style="min-height:140px" placeholder="4 Counterspell&#10;2 Wild Mongrel"></textarea>' +
@@ -2110,15 +2112,201 @@
   }
 
 
+  /* ---------- metagame e confrontos (v0.21) ----------
+     Dados de confronto vêm da IA do próprio usuário (um toque abre a IA com o pedido pronto) e ficam só no aparelho,
+     com a data. Nada é lido automaticamente de sites; nada disso vai para o repositório público. */
+  var metaUi = null;   // { text, err, parsed, busy }
+  var muOpen = {};     // 'idDoDeck|adversário' -> aberto
+  var ICO_X = svg('<path d="M6 6l12 12M18 6 6 18"/>');
+  var ICO_WARN = svg('<path d="M12 3 2 21h20z"/><path d="M12 10v5M12 18h.01"/>');
+  function archOf(d) { return d.arch || FU.suggestArch(d.name); }
+  function todayStr() { var n = new Date(); return n.getFullYear() + '-' + ('0' + (n.getMonth() + 1)).slice(-2) + '-' + ('0' + n.getDate()).slice(-2); }
+  function metaDateText(date) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date || '');
+    return m ? m[3] + '/' + m[2] + '/' + m[1] : 'data não informada';
+  }
+  function premodernDecks() { return state.decks.filter(function (d) { return d.format === 'Premodern'; }); }
+  function metaArchList() {
+    var seen = {}, out = [];
+    premodernDecks().forEach(function (d) { var a = archOf(d); if (a && !seen[a]) { seen[a] = 1; out.push(a); } });
+    return out;
+  }
+  function metaPrompt() {
+    var mine = metaArchList();
+    return [
+      'Preciso de dados de confronto do Premodern (Magic: The Gathering) para os meus decks.',
+      'Meus arquétipos: ' + (mine.length ? mine.join(', ') : '(escolha no app)') + '.',
+      'Para cada um, abra a página do arquétipo no MTG Decks (mtgdecks.net/Premodern, página do arquétipo, aba de winrates) e leia a tabela de taxa de vitória contra os outros decks.',
+      'Inclua estes adversários, menos o próprio deck: ' + FU.META_ARCHS.join(', ') + '.',
+      'Para cada adversário, anote a taxa de vitória do MEU deck contra ele e o número de partidas. Se a tabela for do adversário, inverta (100 menos o valor). Inclua também os de poucas partidas, com o número real de partidas.',
+      'Responda SOMENTE neste formato, dentro de um único bloco de código:',
+      'PLAYSET-META v1\nfonte: MTG Decks (mtgdecks.net/Premodern)\ndata: ' + todayStr() + '\ndeck: (nome do meu arquétipo)\nAdversário|taxa de vitória %|partidas',
+      'Regras: use só números que estão na página, nunca estime nem invente. Se uma página não abrir ou não tiver a tabela, diga qual e peça para eu colar o texto ou um print da tabela. Sem explicações dentro do bloco.',
+      'Se você tiver ferramenta de código, mostre depois do bloco também o link https://uxjesus.github.io/falta-uma/#/meta?d= seguido do bloco em base64url. Sem ferramenta de código, não tente gerar o link.'
+    ].join('\n\n');
+  }
+  function openAi(ai, prompt, okMsg) {
+    copyText(prompt, okMsg);
+    var url = ai[2] + (ai[0] === 'gemini' ? '' : encodeURIComponent(prompt));
+    if (url.length > 7000) url = ai[2];
+    window.open(url, '_blank', 'noopener');
+  }
+  function metaSummaryLine() {
+    var ks = state.meta && state.meta.decks ? Object.keys(state.meta.decks) : [];
+    if (!ks.length) return 'Ainda sem dados salvos.';
+    var last = ks.map(function (k) { return state.meta.decks[k].date || ''; }).sort().pop();
+    return 'Dados salvos de ' + ks.length + (ks.length === 1 ? ' deck' : ' decks') + ' · mais recente: ' + metaDateText(last) + '.';
+  }
+  function metaSectionHtml() {
+    return '<section class="card pad stack" aria-labelledby="mg"><h2 id="mg" style="font-size:1.0625rem">Metagame e confrontos</h2>' +
+      '<p class="muted small">Sua IA busca a taxa de vitória dos seus decks Premodern contra os decks mais jogados. O resultado aparece no fim de cada deck, com a data.</p>' +
+      '<p class="small"><strong>' + esc(metaSummaryLine()) + '</strong></p>' +
+      '<a class="btn primary full" href="#/meta">Atualizar com IA</a></section>';
+  }
+  function viewMeta() {
+    barAction.innerHTML = ''; fab.innerHTML = '';
+    var q = route().query, m = /(?:^|&)d=([^&]+)/.exec(q || '');
+    if (m) {
+      metaUi = { text: '', err: '', parsed: null };
+      try { metaUi.text = FU.b64urlDecode(m[1]); metaUi.parsed = FU.parseMeta(metaUi.text); if (!metaUi.parsed.rows) { metaUi.err = 'O link veio sem dados que eu consiga ler.'; metaUi.parsed = null; } }
+      catch (e) { metaUi.err = 'Não consegui abrir os dados desse link. Cole o texto que a IA mandou no passo 2.'; }
+      try { history.replaceState(null, '', '#/meta'); } catch (e2) {}
+    }
+    if (!metaUi) metaUi = { text: '', err: '', parsed: null };
+    var html = '<header class="head"><a href="#/mais" class="link" style="margin-left:-4px" data-dropmeta>' + ICON.back + 'Voltar</a><h1>Metagame e confrontos</h1></header>';
+    if (metaUi.parsed) return html + metaReviewHtml();
+    var prem = premodernDecks(), noArch = prem.filter(function (d) { return !archOf(d); });
+    var list = prem.length ? '<ul class="small" style="padding-left:20px">' + prem.map(function (d) { var a = archOf(d); return '<li>' + esc(d.name) + ' → ' + (a ? '<strong>' + esc(a) + '</strong>' : '<span style="color:var(--miss);font-weight:700">sem arquétipo (escolha no fim do deck)</span>') + '</li>'; }).join('') + '</ul>' : '<p class="small">Você ainda não tem deck Premodern. Crie um para ver os confrontos.</p>';
+    html += '<div class="form pphoto">' +
+      '<p class="small">' + esc(metaSummaryLine()) + '</p>' +
+      '<section aria-labelledby="m1"><h2 id="m1" class="ph-h"><span aria-hidden="true">1</span>Peça os dados para a sua IA</h2>' +
+      '<p class="small muted">O pedido já vai com os seus decks. A IA lê o MTG Decks e devolve só números da página.</p>' + list +
+      '<button type="button" class="btn primary full" data-mcopy style="margin-top:8px"' + (prem.length ? '' : ' disabled') + '>' + ICON.copy + 'Copiar pedido</button>' +
+      '<div class="aibtns">' + AIS.map(function (a) { return '<button type="button" class="btn" data-mai="' + a[0] + '"' + (prem.length ? '' : ' disabled') + '>Copiar e abrir ' + a[1] + '</button>'; }).join('') + '</div>' +
+      (noArch.length ? '<p class="xs err" style="margin-top:8px">Falta escolher o arquétipo de ' + noArch.length + (noArch.length === 1 ? ' deck' : ' decks') + '. Eles ficam de fora do pedido.</p>' : '') + '</section>' +
+      '<section aria-labelledby="m2"><h2 id="m2" class="ph-h"><span aria-hidden="true">2</span>Cole a resposta aqui</h2>' +
+      '<p class="small muted">Se a IA gerar um link do Playset, é só tocar nele. Se não, copie o bloco que ela mandar e cole abaixo.</p>' +
+      '<label for="mtext" class="visually-hidden">Resposta da IA</label><textarea id="mtext" spellcheck="false" autocapitalize="off" placeholder="PLAYSET-META v1&#10;fonte: MTG Decks&#10;data: 2026-11-19&#10;deck: Burn&#10;Stiflenought|26|50" style="margin-top:8px">' + esc(metaUi.text) + '</textarea>' +
+      '<p id="mErr" class="err" role="alert" style="margin-top:8px">' + esc(metaUi.err) + '</p>' +
+      '<button type="button" class="btn primary full" data-mread style="margin-top:8px">Ler dados</button></section>' +
+      (state.meta && state.meta.decks && Object.keys(state.meta.decks).length ? '<button type="button" class="btn full" data-mclear>Apagar os dados salvos</button>' : '') +
+      '<p class="xs muted">Os dados ficam só neste aparelho (e no seu backup), com a data. A fonte é o MTG Decks; confira lá antes de decisões grandes.</p></div>';
+    return html;
+  }
+  function metaReviewHtml() {
+    var p = metaUi.parsed, ks = Object.keys(p.decks);
+    return '<div class="form" style="gap:12px"><p class="small">Li <strong>' + p.rows + (p.rows === 1 ? ' linha' : ' linhas') + '</strong> de <strong>' + ks.length + (ks.length === 1 ? ' deck' : ' decks') + '</strong>' +
+      (p.skipped.length ? ' e ignorei ' + p.skipped.length + (p.skipped.length === 1 ? ' linha' : ' linhas') + ' que não entendi' : '') + '.</p>' +
+      '<ul class="small" style="padding-left:20px">' + ks.map(function (k) { return '<li><strong>' + esc(k) + '</strong>: ' + p.decks[k].length + ' adversários, ' + p.decks[k].filter(function (r) { return r.n >= FU.META_MIN; }).length + ' com ' + FU.META_MIN + '+ partidas</li>'; }).join('') + '</ul>' +
+      '<p class="small">Data dos dados: <strong>' + esc(p.date ? metaDateText(p.date) : 'não informada (vou usar hoje, ' + metaDateText(todayStr()) + ')') + '</strong>' + (p.source ? ' · ' + esc(p.source) : '') + '</p>' +
+      (ks.some(function (k) { return !FU.META_ARCHS.some(function (a) { return FU.key(a) === FU.key(k); }); }) ? '<p class="xs muted">Há decks com nome fora da lista do app. Eles são salvos, mas só aparecem se o arquétipo do seu deck tiver o mesmo nome.</p>' : '') +
+      '<button type="button" class="btn primary full" data-msave>Salvar no app</button>' +
+      '<button type="button" class="btn full" data-mback>Voltar e editar o texto</button></div>';
+  }
+  function metaRead() {
+    var x = document.getElementById('mtext'); var text = x ? x.value : metaUi.text;
+    metaUi.text = text;
+    var p = FU.parseMeta(text);
+    if (!p.rows) { metaUi.err = 'Não encontrei nenhuma linha no formato Adversário|taxa|partidas. Confira se colou o bloco inteiro.'; render(); keepFocus('#mtext'); return; }
+    metaUi.err = ''; metaUi.parsed = p; render();
+  }
+  function metaSave() {
+    var p = metaUi && metaUi.parsed; if (!p) return;
+    var date = p.date || todayStr();
+    state.meta = state.meta || { decks: {} };
+    state.meta.decks = state.meta.decks || {};
+    Object.keys(p.decks).forEach(function (k) {
+      var old = Object.keys(state.meta.decks).filter(function (x) { return FU.key(x) === FU.key(k); })[0];
+      if (old && old !== k) delete state.meta.decks[old];
+      state.meta.decks[k] = { date: date, source: p.source || 'MTG Decks', savedAt: Date.now(), rows: p.decks[k] };
+    });
+    persist(true);
+    metaUi = null;
+    location.hash = '#/mais';
+    toast('Dados de confronto salvos.');
+  }
+  function collLookup() {
+    var m = {}; collectionData().forEach(function (r) { m[FU.key(r.name)] = r; });
+    return function (n) { return m[FU.key(canonical(n))] || null; };
+  }
+  function chip(kind, text) { return '<span class="chip ' + kind + '">' + (kind === 'no' ? ICO_X : ICO.check) + esc(text) + '</span>'; }
+  function noteStatusChip(s) {
+    if (s.where === 'side') return chip(s.have >= s.qty ? 'ok' : (s.have ? 'mid' : 'no'), 'No seu sideboard · ' + (s.have >= s.qty ? 'você tem' : (s.have ? 'tem ' + s.have + ' de ' + s.qty : 'ainda não tem')));
+    if (s.where === 'main') return chip(s.have ? 'mid' : 'no', 'No seu deck principal · ' + (s.have ? 'você tem' : 'ainda não tem'));
+    if (s.where === 'colecao') return chip('ok', s.spare ? 'Na sua coleção, fora dos decks (' + s.spare + ')' : 'Está em outro deck ou lista sua (' + s.have + ')');
+    return chip('no', 'Você não tem');
+  }
+  function deckLines(d, side) {
+    return d.cards.filter(function (c) { return side ? c.board === 'side' : c.board !== 'side'; })
+      .map(function (c) { return c.qty + ' ' + canonical(c.name) + (c.owned < c.qty && !FU.isBasic(c.name) ? ' (tenho ' + (c.owned || 0) + ')' : ''); }).join('\n') || '(vazio)';
+  }
+  function matchupAiPrompt(d, arch, r, date) {
+    var spare = collectionData().filter(function (x) { return x.spare > 0; }).slice(0, 200).map(function (x) { return x.spare + ' ' + x.name; }).join('\n') || '(nenhuma)';
+    return [
+      'Sou jogador de Premodern (Magic: The Gathering). Meu deck é "' + d.name + '" (arquétipo ' + arch + ').',
+      'Contra ' + r.o + ', a taxa de vitória do meu arquétipo é ' + r.wr + '% em ' + r.n + ' partidas (MTG Decks, dados de ' + metaDateText(date) + '). Quero sugestões de sideboard para esse confronto.',
+      'Meu deck principal:\n' + deckLines(d, false),
+      'Meu sideboard:\n' + deckLines(d, true),
+      'Cartas que eu tenho fora dos decks (coleção):\n' + spare,
+      'Regras:\n1. Diga o que TIRAR e o que COLOCAR, mantendo 60 cartas no principal e 15 no sideboard.\n2. Use SÓ cartas do meu deck, do meu sideboard ou da minha coleção. Se uma carta muito boa não estiver em nenhuma, coloque-a numa lista à parte marcada "você não tem".\n3. Cada sugestão com a fonte (link) e a data. Marque como "inferência" o que for raciocínio seu e não vier de uma fonte.\n4. Com menos de 30 partidas, diga que o número é só uma pista. Se não achar fontes boas, diga isso em vez de inventar.\n5. Explique em passos curtos, em português.'
+    ].join('\n\n');
+  }
+  function matchupPanel(d, arch, r, date) {
+    var note = FU.sideNote(arch, r.o), lookup = collLookup();
+    var h = '<div class="mu-panel"><p class="small"><strong>' + esc(arch) + ' × ' + esc(r.o) + '</strong>: ' + r.wr + '% em ' + r.n + ' partidas' + (r.n < FU.META_SMALL ? ' (amostra pequena: use como pista)' : '') + '.</p>';
+    if (note) {
+      h += note.lines.map(function (l) { return '<p class="small">' + esc(l) + '</p>'; }).join('');
+      h += '<p class="small"><strong>Cartas que o guia sugere trazer</strong></p><ul class="mu-cards">' + note.in.map(function (n) {
+        return '<li><span class="nm">' + esc(n) + '</span> ' + noteStatusChip(FU.noteCardStatus(n, d, canonical, lookup)) + '</li>'; }).join('') + '</ul>';
+      h += '<p class="small">' + esc(note.expect) + '</p>';
+      h += '<p class="small"><span class="chip mid">Inferência</span> ' + esc(note.infer.replace(/^Inferência minha:\s*/, '')) + '</p>';
+      h += '<p class="xs">Fontes: ' + note.src.map(function (s) { return '<a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.label) + '</a> (' + (s.date ? metaDateText(s.date) : 'sem data na página') + ')'; }).join(' · ') + '</p>';
+    } else {
+      h += '<p class="small">Ainda não tenho um guia conferido para este confronto, e não vou inventar. Peça à sua IA: o pedido já vai com o seu deck, o seu sideboard e a sua coleção.</p>';
+    }
+    h += '<button type="button" class="btn primary full" data-muai="' + esc(d.id) + '|' + esc(r.o) + '">Pedir sugestão à IA (abre o Claude)</button>' +
+      '<button type="button" class="btn full" data-mucopy="' + esc(d.id) + '|' + esc(r.o) + '">' + ICON.copy + 'Copiar o pedido</button>' +
+      '<p class="xs"><a class="lnk" href="https://mtgdecks.net/Premodern/' + esc(encodeURIComponent(arch.toLowerCase().replace(/\s+/g, '-'))) + '" target="_blank" rel="noopener">Abrir ' + esc(arch) + ' no MTG Decks</a></p></div>';
+    return h;
+  }
+  function matchupCard(d) {
+    if (d.format !== 'Premodern') return '';
+    var arch = archOf(d), auto = FU.suggestArch(d.name);
+    var h = '<section class="card pad stack mu" aria-labelledby="muH" style="margin:16px"><h2 id="muH" style="font-size:1.0625rem">Piores matchups</h2>' +
+      '<div><label for="muArch" class="small"><strong>Arquétipo do deck</strong></label>' +
+      '<select id="muArch" class="field" data-arch="' + esc(d.id) + '" style="margin-top:4px"><option value="">' + (auto ? 'Automático (' + esc(auto) + ')' : 'Escolher…') + '</option>' +
+      FU.META_ARCHS.map(function (a) { return '<option' + (d.arch === a ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') + '</select></div>';
+    var e = arch ? FU.metaEntry(state.meta, arch) : null;
+    if (!arch) return h + '<p class="small">Escolha o arquétipo acima para ver os confrontos.</p></section>';
+    if (!e) return h + '<p class="small">Sem dados de confronto para <strong>' + esc(arch) + '</strong> ainda.</p><a class="btn primary full" href="#/meta">Atualizar com IA</a></section>';
+    var age = FU.metaAgeDays(e.date), sp = FU.metaSplit(e.rows);
+    h += '<p class="small" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">Dados de <strong>' + esc(metaDateText(e.date)) + '</strong> · ' + esc(e.source || 'MTG Decks') +
+      (age != null && age > FU.META_STALE_DAYS ? '<span class="seal warn">' + ICO_WARN + 'Desatualizado (' + age + ' dias)</span>' : '') + '</p>';
+    if (!sp.ok.length) {
+      h += '<p class="small"><strong>Poucos dados:</strong> nenhum confronto com ' + FU.META_MIN + ' partidas ou mais.</p>' +
+        (sp.few.length ? '<ul class="small" style="padding-left:20px">' + sp.few.slice(0, 3).map(function (r) { return '<li>' + esc(r.o) + ': ' + r.wr + '% em ' + r.n + ' partidas</li>'; }).join('') + '</ul>' : '');
+    } else {
+      if (!sp.bad.length) h += '<p class="small">Nenhum confronto abaixo de 50% com ' + FU.META_MIN + '+ partidas. Estes são os de menor taxa:</p>';
+      sp.ok.slice(0, 3).forEach(function (r) {
+        var id = d.id + '|' + r.o, open = !!muOpen[id];
+        h += '<button type="button" class="mu-row" data-mu="' + esc(id) + '" aria-expanded="' + open + '"><span class="o">' + esc(r.o) + '</span><span class="w">' + r.wr + '%</span>' +
+          '<span class="s">' + r.n + ' partidas' + (r.n < FU.META_SMALL ? ' · amostra pequena' : '') + ' · toque para ver o que fazer</span></button>' + (open ? matchupPanel(d, arch, r, e.date) : '');
+      });
+      if (sp.few.length) h += '<p class="xs muted">' + sp.few.length + (sp.few.length === 1 ? ' confronto' : ' confrontos') + ' com menos de ' + FU.META_MIN + ' partidas: poucos dados, não entram na lista.</p>';
+    }
+    return h + '<a class="btn full" href="#/meta">Atualizar com IA</a></section>';
+  }
+
   /* ---------- roteamento ---------- */
   function route() {
-    var parts = (location.hash || '#/falta').replace(/^#\//, '').split('/');
-    return { name: parts[0] || 'falta', id: parts[1] };
+    var raw = (location.hash || '#/falta').replace(/^#\//, ''), qi = raw.indexOf('?');
+    var parts = (qi === -1 ? raw : raw.slice(0, qi)).split('/');
+    return { name: parts[0] || 'falta', id: parts[1], query: qi === -1 ? '' : raw.slice(qi + 1) };
   }
   function render() {
     var r = route();
-    var tab = ({ troca: 'colecao', precos: 'mais', deck: 'decks', novo: 'decks', editar: 'decks', fonte: 'decks', foto: r.id === 'colecao' ? 'colecao' : 'decks' })[r.name] || r.name;
-    document.body.classList.toggle('home', ['decks', 'deck', 'novo', 'editar', 'mais', 'fonte', 'colecao', 'foto', 'precos', 'troca'].indexOf(r.name) === -1);
+    var tab = ({ troca: 'colecao', precos: 'mais', meta: 'mais', deck: 'decks', novo: 'decks', editar: 'decks', fonte: 'decks', foto: r.id === 'colecao' ? 'colecao' : 'decks' })[r.name] || r.name;
+    document.body.classList.toggle('home', ['decks', 'deck', 'novo', 'editar', 'mais', 'fonte', 'colecao', 'foto', 'precos', 'troca', 'meta'].indexOf(r.name) === -1);
     document.querySelectorAll('nav.tabs a').forEach(function (a) {
       if (a.getAttribute('data-tab') === tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     });
@@ -2126,7 +2314,7 @@
     var pip = mais.querySelector('.pip');
     if (needsBackup() && !pip) mais.insertAdjacentHTML('beforeend', '<span class="pip"></span><span class="visually-hidden"> (backup pendente)</span>');
     if (!needsBackup() && pip) { pip.nextElementSibling.remove(); pip.remove(); }
-    var titles = { falta: 'O que me falta', decks: 'Decks', mais: 'Mais', novo: 'Adicionar deck', editar: 'Editar deck', fonte: 'Adicionar fonte', colecao: 'Coleção', foto: 'Importar por foto', precos: 'Preços da Liga', troca: 'Modo troca' };
+    var titles = { falta: 'O que me falta', decks: 'Decks', mais: 'Mais', novo: 'Adicionar deck', editar: 'Editar deck', fonte: 'Adicionar fonte', colecao: 'Coleção', foto: 'Importar por foto', precos: 'Preços da Liga', troca: 'Modo troca', meta: 'Metagame e confrontos' };
     var d = r.name === 'deck' ? deckById(r.id) : null;
     document.title = (d ? d.name : (titles[r.name] || 'O que me falta')) + ' · Playset';
     if (r.name === 'decks') main.innerHTML = viewDecks();
@@ -2139,6 +2327,7 @@
     else if (r.name === 'foto') main.innerHTML = viewFoto(r.id);
     else if (r.name === 'precos') main.innerHTML = viewPrecos();
     else if (r.name === 'troca') main.innerHTML = viewTroca();
+    else if (r.name === 'meta') main.innerHTML = viewMeta();
     else main.innerHTML = viewFalta();
     heroStart();
   }
@@ -2171,6 +2360,11 @@
   });
 
   main.addEventListener('change', function (e) {
+    if (e.target.hasAttribute('data-arch')) {
+      var ad = deckById(e.target.getAttribute('data-arch'));
+      if (ad) { if (e.target.value) ad.arch = e.target.value; else delete ad.arch; persist(true); render(); keepFocus('#muArch'); }
+      return;
+    }
     if (e.target.id === 'ptarget') { readPhotoInputs(); render(); keepFocus('#ptarget'); return; }
     if (e.target.id === 'si') { var f = e.target.files && e.target.files[0]; if (f) readImage(f); return; }
     if (e.target.hasAttribute('data-sortsel')) { state.ui.sort = e.target.value; persist(false); render(); keepFocus('#fSort'); return; }
@@ -2190,6 +2384,7 @@
     if (e.target.closest('[data-dropdraft]')) draft = null;
     if (e.target.closest('[data-dropphoto]')) photo = null;
     if (e.target.closest('[data-droplp]')) lp = null;
+    if (e.target.closest('[data-dropmeta]')) metaUi = null;
     var aca = e.target.closest('[data-acadd]');
     if (aca && main.contains(aca)) { acAdd(aca.getAttribute('data-acadd')); return; }
     if (e.target.closest('[data-acgo]')) { acGo(); return; }
@@ -2263,6 +2458,22 @@
       pd.pinned = !pd.pinned; persist(true); render(); keepFocus('[data-pin]');
       toast(pd.pinned ? 'Deck fixado no topo.' : 'Deck desafixado.'); return;
     }
+    if (t.hasAttribute('data-mu')) { var mk = t.getAttribute('data-mu'); muOpen[mk] = !muOpen[mk]; render(); keepFocus('[data-mu="' + mk.replace(/"/g, '\\"') + '"]'); return; }
+    if (t.hasAttribute('data-muai') || t.hasAttribute('data-mucopy')) {
+      var mv = (t.getAttribute('data-muai') || t.getAttribute('data-mucopy')).split('|'), md = deckById(mv[0]);
+      var ma = md ? archOf(md) : '', me = ma ? FU.metaEntry(state.meta, ma) : null;
+      var mr = me && me.rows.filter(function (r) { return r.o === mv.slice(1).join('|'); })[0];
+      if (!mr) return;
+      var mp = matchupAiPrompt(md, ma, mr, me.date);
+      if (t.hasAttribute('data-muai')) openAi(AIS[0], mp, 'Pedido copiado. Se a IA abrir vazia, é só colar.'); else copyText(mp, 'Pedido copiado. Cole na sua IA.');
+      return;
+    }
+    if (t.hasAttribute('data-mcopy')) { copyText(metaPrompt(), 'Pedido copiado. Cole na sua IA.'); return; }
+    if (t.hasAttribute('data-mai')) { var mai = AIS.filter(function (a) { return a[0] === t.getAttribute('data-mai'); })[0]; openAi(mai, metaPrompt(), 'Pedido copiado. Se a IA abrir vazia, é só colar.'); return; }
+    if (t.hasAttribute('data-mread')) { metaRead(); return; }
+    if (t.hasAttribute('data-mback')) { metaUi.parsed = null; render(); keepFocus('#mtext'); return; }
+    if (t.hasAttribute('data-msave')) { metaSave(); return; }
+    if (t.hasAttribute('data-mclear')) { if (confirm('Apagar os dados de confronto salvos? Os decks não mudam.')) { delete state.meta; persist(true); render(); toast('Dados apagados.'); } return; }
     if (t.hasAttribute('data-photo')) { location.hash = '#/foto/' + t.getAttribute('data-photo'); return; }
     if (t.hasAttribute('data-ctab')) { state.ui.colTab = t.getAttribute('data-ctab'); persist(false); render(); keepFocus('[data-ctab="' + state.ui.colTab + '"]'); return; }
     if (t.hasAttribute('data-pcopy')) { copyText(photoPrompt(), 'Prompt copiado. Cole na sua IA e mande a foto.'); return; }

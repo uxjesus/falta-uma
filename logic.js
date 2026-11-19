@@ -484,7 +484,153 @@
     return { rows: rows, skipped: skipped };
   }
 
+  /* ---------- metagame e confrontos (v0.21) ----------
+     Os dados vêm da IA do próprio usuário, no formato PLAYSET-META v1:
+       PLAYSET-META v1 / fonte: ... / data: AAAA-MM-DD / deck: Burn / Stiflenought|26|50
+     Cada linha: adversário | taxa de vitória % do deck do usuário | partidas. */
+  var META_MIN = 10;      // menos partidas que isso = "poucos dados"
+  var META_SMALL = 30;    // abaixo disso o número ainda é só uma pista
+  var META_STALE_DAYS = 14;
+  var META_ARCHS = ['Stiflenought', 'Burn', 'Enchantress', 'Goblins', 'Mono Black', 'Terrageddon',
+    'Replenish', 'Landstill', 'Oath Ponza', 'Psychatog', 'Full English Breakfast', 'Stasis', 'Madness'];
+
+  /* Sugere o arquétipo pelo nome do deck. O usuário sempre pode corrigir. */
+  function suggestArch(name) {
+    var n = norm(name || '');
+    var rules = [
+      [/sligh|burn|mono ?red|\brdw\b/, 'Burn'], [/landstill/, 'Landstill'], [/psychatog|\btog\b/, 'Psychatog'],
+      [/madness/, 'Madness'], [/stifle|dreadnought/, 'Stiflenought'], [/enchantress/, 'Enchantress'],
+      [/goblin/, 'Goblins'], [/mono ?black/, 'Mono Black'], [/replenish/, 'Replenish'],
+      [/terrageddon|terragedon/, 'Terrageddon'], [/oath|ponza/, 'Oath Ponza'],
+      [/full english|breakfast/, 'Full English Breakfast'], [/stasis/, 'Stasis']
+    ];
+    for (var i = 0; i < rules.length; i++) if (rules[i][0].test(n)) return rules[i][1];
+    return '';
+  }
+
+  function validDate(y, m, d) {
+    var dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+  }
+
+  /* Lê o texto devolvido pela IA. Tolerante: aceita bloco de código, % e vírgula decimal. Nunca inventa. */
+  function parseMeta(text) {
+    var t = String(text || '').replace(/\r/g, '').replace(/```[a-z]*/gi, '');
+    var out = { date: null, source: '', decks: {}, rows: 0, skipped: [], sawHeader: false };
+    var cur = null;
+    t.split('\n').forEach(function (raw) {
+      var l = raw.trim();
+      if (!l) return;
+      var m;
+      if (/^playset-meta\b/i.test(l)) { out.sawHeader = true; return; }
+      if ((m = l.match(/^(?:fonte|source)\s*:\s*(.+)$/i))) { out.source = m[1].trim().slice(0, 80); return; }
+      if ((m = l.match(/^(?:data|date)\s*:\s*(\d{4})-(\d{2})-(\d{2})/i))) {
+        if (validDate(+m[1], +m[2], +m[3])) out.date = m[1] + '-' + m[2] + '-' + m[3];
+        else out.skipped.push(l);
+        return;
+      }
+      if ((m = l.match(/^deck\s*:\s*(.+)$/i))) {
+        cur = m[1].trim().slice(0, 60);
+        if (!out.decks[cur]) out.decks[cur] = [];
+        return;
+      }
+      var p = l.split('|');
+      if (cur && p.length >= 3) {
+        var o = p[0].trim().slice(0, 60);
+        var wr = parseFloat(String(p[1]).replace('%', '').replace(',', '.'));
+        var nm = String(p[2]).trim().match(/^(\d+)(?:\s*(?:partidas?|matches|jogos))?$/i);
+        var n = nm ? parseInt(nm[1], 10) : NaN;
+        if (o && isFinite(wr) && wr >= 0 && wr <= 100 && n >= 1 && n <= 100000) {
+          var arr = out.decks[cur], dup = arr.filter(function (r) { return key(r.o) === key(o); })[0];
+          if (dup) { if (n > dup.n) { dup.wr = Math.round(wr * 10) / 10; dup.n = n; } }
+          else { arr.push({ o: o, wr: Math.round(wr * 10) / 10, n: n }); out.rows++; }
+          return;
+        }
+      }
+      out.skipped.push(l);
+    });
+    Object.keys(out.decks).forEach(function (k) { if (!out.decks[k].length) delete out.decks[k]; });
+    return out;
+  }
+
+  /* base64url com UTF-8 (para o link #/meta?d=...). */
+  function b64urlDecode(s) {
+    var b = String(s || '').replace(/-/g, '+').replace(/_/g, '/').replace(/[^A-Za-z0-9+/=]/g, '');
+    while (b.length % 4) b += '=';
+    var bin = (typeof atob === 'function' ? atob : function (x) { return Buffer.from(x, 'base64').toString('binary'); })(b);
+    var bytes = [];
+    for (var i = 0; i < bin.length; i++) bytes.push('%' + ('00' + bin.charCodeAt(i).toString(16)).slice(-2));
+    return decodeURIComponent(bytes.join(''));
+  }
+  function b64urlEncode(s) {
+    var bin = unescape(encodeURIComponent(String(s)));
+    var b = (typeof btoa === 'function' ? btoa : function (x) { return Buffer.from(x, 'binary').toString('base64'); })(bin);
+    return b.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  /* Acha os dados salvos de um arquétipo (sem diferenciar maiúsculas): { date, source, rows }. */
+  function metaEntry(meta, arch) {
+    if (!meta || !meta.decks || !arch) return null;
+    var k = key(arch), hit = Object.keys(meta.decks).filter(function (x) { return key(x) === k; })[0];
+    var e = hit ? meta.decks[hit] : null;
+    return e && Array.isArray(e.rows) ? e : null;
+  }
+
+  /* Separa o que tem partidas suficientes do que não tem; ordena do pior para o melhor. */
+  function metaSplit(rows) {
+    var ok = [], few = [];
+    (rows || []).forEach(function (r) { (r.n >= META_MIN ? ok : few).push(r); });
+    ok.sort(function (a, b) { return a.wr - b.wr || b.n - a.n; });
+    few.sort(function (a, b) { return b.n - a.n; });
+    return { ok: ok, few: few, bad: ok.filter(function (r) { return r.wr < 50; }) };
+  }
+
+  function metaAgeDays(date, now) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date || '');
+    if (!m) return null;
+    var then = Date.UTC(+m[1], +m[2] - 1, +m[3]);
+    var n = new Date(now == null ? Date.now() : now);
+    return Math.floor((Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()) - then) / 86400000);
+  }
+
+  /* Notas de sideboard curadas, com palavras próprias e fonte. Só entra o que foi conferido na fonte.
+     chave: "meu deck|adversário". "in" = cartas que o guia sugere trazer; "expect" = o que o adversário traz contra mim. */
+  var SIDE_NOTES = {
+    'Burn|Stiflenought': {
+      in: ['Mogg Salvage', 'Overload'],
+      lines: [
+        'Guia de Mono Red Sligh: Mogg Salvage e Overload funcionam bem contra o Stiflenought (respondem aos artefatos dele). O guia diz que o Stiflenought gasta mana com muita eficiência, então vale cortar cartas caras e as que dão brecha para Hydroblast e Foil/Daze ganharem tempo.'
+      ],
+      expect: 'Um guia de Stiflenought diz que, contra Sligh, ele troca as cartas de compra (4 Accumulated Knowledge e 2 Flash of Insight saem) por 3 Hydroblast, 2 Essence Flare e 1 Powder Keg. Essence Flare cuida das criaturas vermelhas baratas e guarda os Hydroblast para alvos melhores.',
+      infer: 'Inferência minha: como o outro lado traz respostas baratas, muitas ameaças baratas pesam mais do que poucas caras.',
+      src: [
+        { label: 'Cardsrealm: guia de Mono Red Sligh', url: 'https://mtg.cardsrealm.com/en-us/p/250319', date: null },
+        { label: 'Ultimate Guard: guia de Stiflenought', url: 'https://ultimateguard.com/en/blog/mastering-stiflenought-in-premodern-deck-guide-strategy-sideboard-plans', date: '2026-02-17' }
+      ]
+    }
+  };
+  function sideNote(arch, opp) { return SIDE_NOTES[arch + '|' + opp] || null; }
+
+  /* Onde está cada carta sugerida: no sideboard, no principal, na coleção ou "você não tem".
+     collInfo(nome) -> { total, spare } da Coleção (cartas marcadas como "tenho"). */
+  function noteCardStatus(name, deck, canonical, collInfo) {
+    var k = key(canonical ? canonical(name) : name);
+    var cards = (deck && deck.cards) || [];
+    var hit = function (board) {
+      return cards.filter(function (c) { return (board === 'side' ? c.board === 'side' : c.board !== 'side') && key(canonical ? canonical(c.name) : c.name) === k; })[0];
+    };
+    var s = hit('side'), m = hit('main');
+    if (s) return { name: name, where: 'side', have: s.owned || 0, qty: s.qty };
+    if (m) return { name: name, where: 'main', have: m.owned || 0, qty: m.qty };
+    var ci = collInfo ? collInfo(name) : null;
+    if (ci && ci.total > 0) return { name: name, where: 'colecao', have: ci.total, spare: ci.spare || 0 };
+    return { name: name, where: 'nao', have: 0 };
+  }
+
   var api = {
+    META_MIN: META_MIN, META_SMALL: META_SMALL, META_STALE_DAYS: META_STALE_DAYS, META_ARCHS: META_ARCHS,
+    suggestArch: suggestArch, parseMeta: parseMeta, b64urlDecode: b64urlDecode, b64urlEncode: b64urlEncode,
+    metaEntry: metaEntry, metaSplit: metaSplit, metaAgeDays: metaAgeDays, sideNote: sideNote, noteCardStatus: noteCardStatus,
     parsePriceBR: parsePriceBR, parseLigaPrices: parseLigaPrices,
     edsSum: edsSum, edsMerge: edsMerge, edsTake: edsTake, edsPop: edsPop,
     splitSource: splitSource, markOwned: markOwned,

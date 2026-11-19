@@ -392,6 +392,18 @@ a.lg .icon{width:20px;height:20px}
 .seal{display:inline-flex;align-items:center;gap:4px;min-height:24px;padding:0 8px;border-radius:4px;font-size:.75rem;font-weight:800;border:1.5px solid currentColor;line-height:1}
 .seal .icon{width:14px;height:14px}
 .seal.ok{color:var(--ok)} .seal.pin{color:var(--accent)}
+.mu-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;align-items:center;width:100%;min-height:56px;padding:8px 12px;border:1.5px solid var(--line-strong);border-radius:var(--r-sm);background:var(--surface);color:var(--text);text-align:left;cursor:pointer}
+.mu-row[aria-expanded="true"]{background:var(--accent-soft);border-color:var(--accent)}
+.mu-row .o{font-weight:800}.mu-row .w{font-weight:800;font-variant-numeric:tabular-nums;font-size:1.0625rem}
+.mu-row .s{grid-column:1/-1;font-size:.8125rem;color:var(--muted)}
+.mu-panel{display:grid;gap:10px;padding:12px;margin-top:-4px;border:1.5px solid var(--line-strong);border-left:4px solid var(--accent);border-radius:var(--r-sm);background:var(--surface)}
+.mu-row[aria-expanded="true"] .s{color:var(--text)}
+.mu-panel .lnk{display:inline-flex;align-items:center;min-height:44px;font-weight:700}
+.mu-cards{list-style:none;padding:0;display:grid;gap:8px}.mu-cards .nm{display:block;font-weight:800;margin-bottom:2px}
+.chip{display:inline-flex;align-items:center;gap:4px;min-height:24px;padding:2px 8px;border-radius:4px;border:1.5px solid currentColor;font-size:.8125rem;font-weight:800;line-height:1.2}
+.chip .icon{width:14px;height:14px;flex:none}.chip.ok{color:var(--ok)}.chip.no{color:var(--miss)}.chip.mid{color:var(--accent)}
+.seal.warn{color:var(--miss)}
+
 .seal.ok.on-art{background:rgba(10,10,12,.82);color:#86d9a0;border-color:#86d9a0}
 .banner .toprow{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .pinbtn{display:inline-flex;align-items:center;gap:6px;min-height:var(--tap);padding:0 14px;border-radius:var(--r-pill);border:1.5px solid #fff;background:rgba(10,10,12,.82);color:#fff;font-weight:800;font-size:.9375rem;cursor:pointer}
