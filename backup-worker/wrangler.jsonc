@@ -1,0 +1,9 @@
+{
+  "name": "playset-backup",
+  "main": "worker.js",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": true,
+  "kv_namespaces": [
+    { "binding": "BACKUP", "id": "d265549f89d84e24a2af5880e14cbe4f" }
+  ]
+}
