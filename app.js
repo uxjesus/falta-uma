@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.20.0';
+  var APP_VERSION = '0.21.0';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -946,6 +946,8 @@
         '<li><button data-exp="share"' + (miss.length ? '' : ' disabled') + '>' + ICON.share + '<span>Compartilhar o que falta<small>WhatsApp e outros apps</small></span></button></li>' +
         (ctx !== 'falta' ? '<li><button data-exp="full">' + ICON.copy + '<span>Copiar a lista completa do deck<small>Para colar no Moxfield, Archidekt ou Arena</small></span></button></li>' : '') +
         '</ul>';
+    } else if (type === 'mu') {
+      html = muSheetHtml(ctx);
     } else if (type === 'owned') {
       html = '<h2 id="sheetTitle">Marcar o que eu tenho</h2>' +
         '<p class="small muted" id="ownh">Cole a lista das cartas que você tem (ex.: 4 Counterspell). Sem número, marco todas as cópias. Só marco: não desmarco nada.</p>' +
@@ -973,6 +975,12 @@
       openSheet(sheetCtx.type, ctx);
       var again = sheetBody.querySelector('[data-set="' + k + '"][data-val="' + (window.CSS && CSS.escape ? CSS.escape(v) : v) + '"]');
       if (again) again.focus();
+      return;
+    }
+    if (t.hasAttribute('data-muai')) {
+      var mai = AIS.filter(function (a) { return a[0] === t.getAttribute('data-muai'); })[0], mq = muQuestion(t.getAttribute('data-mq'));
+      copyText(mq, 'Pergunta copiada. Se a IA abrir vazia, é só colar.');
+      window.open(mai[2] + encodeURIComponent(mq), '_blank', 'noopener');
       return;
     }
     if (t.hasAttribute('data-ownapply')) {
@@ -1177,6 +1185,7 @@
       html += '<section class="sec">' + secHead(bk, 'Terrenos básicos', basics.reduce(function (s, c) { return s + c.qty; }, 0), '<span class="sum">não contam</span>') +
         (isClosed(bk) ? '' : '<ul class="rows">' + basics.map(function (c) { return '<li class="r"><span class="q">' + c.qty + '</span><span class="nm" style="cursor:default">' + esc(c.name) + (c.board === 'side' ? ' (side)' : '') + '</span><span></span><span></span></li>'; }).join('') + '</ul>') + '</section>';
     }
+    html += matchupCardHtml(d);
     html += addCardHtml(d);
     html += '<p class="foot">' + (view === 'list' ? 'Toque no marcador à direita para dizer que tem todas (ou nenhuma). ' : '') + 'Toque numa carta para mudar a quantidade, mover para o sideboard, tirar do deck ou ajustar quantas você tem.</p>';
     return html;
@@ -1363,6 +1372,9 @@
       '<button class="btn primary full" data-act="refresh">' + ICON.refresh + 'Atualizar agora</button>' +
       '<p class="xs muted">O preço automático vem do Scryfall em dólar (mercado americano). É só uma noção. O preço que vale é o da Liga Magic, na seção abaixo.</p></section>' +
       ligaSectionHtml() +
+      '<section class="card pad stack" aria-labelledby="mu"><h2 id="mu" style="font-size:1.0625rem">Matchups e sideboard</h2>' +
+      '<p class="muted small">Descubra contra quais decks o seu deck mais sofre e o que mexer no sideboard. A sua IA busca os dados.</p>' +
+      '<a class="btn primary full" href="#/meta">Atualizar com IA</a></section>' +
       '<section class="card pad stack" aria-labelledby="fr"><h2 id="fr" style="font-size:1.0625rem">Lista de um amigo</h2>' +
       '<p class="muted small">Cole a lista que ele mandou. Eu mostro quais dessas cartas você marcou que tem, nos decks, nas listas ou guardadas.</p>' +
       '<label for="fl" class="visually-hidden">Lista do amigo</label><textarea id="fl" spellcheck="false" autocapitalize="off" style="min-height:140px" placeholder="4 Counterspell&#10;2 Wild Mongrel"></textarea>' +
@@ -2110,15 +2122,166 @@
   }
 
 
+  /* ---------- matchups e sideboard (dados vindos da IA do Érick, só no aparelho) ---------- */
+  var META_KEY = 'fu.meta.v1';
+  var META_MIN = 10;      // menos partidas que isso = "poucos dados"
+  var META_LINK = 'https://uxjesus.github.io/falta-uma/#/meta?d=';
+  var meta = load(META_KEY, null);
+  var ARCH_GUESS = [[/sligh|burn|mono.?red/i, 'Burn'], [/land.?still|w control|uw control/i, 'Landstill'], [/psychatog|\btog\b/i, 'Psychatog'], [/madness/i, 'Madness']];
+  /* Notas de sideboard guardadas à mão, com fonte. Chave: arquétipo|adversário (minúsculas). */
+  var MU_NOTES = {
+    'burn|stiflenought': {
+      txt: 'Guias recomendam trazer Mogg Salvage e Overload, tirar cartas caras (Hydroblast, Foil e Daze têm janela) e usar Pyroblast contra Stifle, Vision Charm e Counterspell. Sideboard real de uma lista de Sligh (CPS Monthly League 2025): 2 Anarchy, 4 Overload, 1 Price of Progress, 2 Pyrokinesis, 4 Red Elemental Blast, 2 Tormod\'s Crypt. Datas dos guias não confirmadas.',
+      links: [['Guia Cardsrealm: Mono Red Sligh', 'https://mtg.cardsrealm.com/en-us/p/250319'], ['Lista real no MTGTop8', 'https://www.mtgtop8.com/event?e=69543']]
+    }
+  };
+  function metaGuess(d) {
+    var hit = ARCH_GUESS.filter(function (g) { return g[0].test(d.name || ''); })[0];
+    return hit ? hit[1] : '';
+  }
+  function metaArch(d) { return d.arch || metaGuess(d); }
+  function metaDeckKey(name) {
+    if (!meta || !name) return null;
+    var k = FU.norm(name);
+    return Object.keys(meta.decks).filter(function (x) { return FU.norm(x) === k; })[0] || null;
+  }
+  /* Lê o texto PLAYSET-META v1. Devolve { fonte, data, decks } ou { err }. */
+  function metaParse(text) {
+    var out = { fonte: '', data: '', decks: {} }, cur = null, n = 0;
+    String(text || '').replace(/```/g, '').split(/\r?\n/).forEach(function (raw) {
+      var l = raw.trim();
+      if (!l) return;
+      var m;
+      if ((m = l.match(/^fonte\s*:\s*(.+)$/i))) { out.fonte = m[1].trim(); return; }
+      if ((m = l.match(/^data\s*:\s*(.+)$/i))) { out.data = m[1].trim(); return; }
+      if ((m = l.match(/^deck\s*:\s*(.+)$/i))) { cur = m[1].trim(); out.decks[cur] = out.decks[cur] || []; return; }
+      var p = l.split('|');
+      if (!cur || p.length < 3) return;
+      var wr = parseFloat(p[1].replace('%', '').replace(',', '.')), g = parseInt(p[2].replace(/\D/g, ''), 10);
+      if (!p[0].trim() || isNaN(wr) || wr < 0 || wr > 100 || isNaN(g)) return;
+      out.decks[cur].push({ opp: p[0].trim(), wr: wr, n: g }); n++;
+    });
+    if (!n) return { err: 'Não achei nenhuma linha de matchup. Cole o texto inteiro que a IA devolveu.' };
+    return out;
+  }
+  function metaSave(p) {
+    meta = { fonte: p.fonte, data: p.data, at: Date.now(), decks: p.decks };
+    save(META_KEY, meta);
+  }
+  function b64urlDecode(s) {
+    s = String(s).replace(/-/g, '+').replace(/_/g, '/');
+    while (s.length % 4) s += '=';
+    return decodeURIComponent(escape(atob(s)));
+  }
+  /* Chega por link (#/meta?d=...): importa e limpa o endereço. */
+  function metaFromHash() {
+    var m = (location.hash || '').match(/^#\/meta\?d=([^&]+)/);
+    if (!m) return;
+    try {
+      var p = metaParse(b64urlDecode(m[1]));
+      if (p.err) { metaMsg = p.err; }
+      else { metaSave(p); var n = 0; Object.keys(p.decks).forEach(function (k) { n += p.decks[k].length; }); metaMsg = 'Dados importados: ' + n + ' matchups.'; }
+    } catch (e) { metaMsg = 'O link veio quebrado. Cole o texto no campo abaixo.'; }
+    history.replaceState(null, '', '#/meta');
+  }
+  var metaMsg = '';
+  function metaPrompt() {
+    var names = {};
+    state.decks.forEach(function (d) { if (d.format === 'Premodern') { var a = metaArch(d); if (a) names[a] = 1; } });
+    var list = Object.keys(names);
+    if (!list.length) list = ['Burn', 'Landstill', 'Psychatog', 'Madness'];
+    return [
+      'Leia no mtgdecks.net/Premodern a página de cada um destes arquétipos: ' + list.join(', ') + '.',
+      'Em cada uma, pegue a tabela "winrates". Para cada adversário com 10 partidas ou mais, anote o winrate do MEU deck contra ele (se a tabela for do adversário, inverta: 100 menos o valor). Ignore o adversário "Rogue".',
+      'Devolva exatamente neste formato, com a data de hoje:',
+      'PLAYSET-META v1',
+      'fonte: MTG Decks (mtgdecks.net/Premodern)',
+      'data: AAAA-MM-DD',
+      'deck: Nome do arquétipo',
+      'Adversário|winrate do meu deck em %|número de partidas',
+      '(uma linha por adversário; repita "deck:" para cada arquétipo)',
+      'Depois gere o link ' + META_LINK + ' seguido do texto acima em base64url. Se não conseguir gerar o link, mostre só o texto num bloco de código para eu copiar.',
+      'Se alguma página não abrir, diga qual e não invente número.'
+    ].join('\n');
+  }
+  function viewMeta() {
+    barAction.innerHTML = ''; fab.innerHTML = '';
+    var html = '<header class="head"><a href="#/mais" class="link" style="margin-left:-4px">' + ICON.back + 'Voltar</a><h1>Matchups e sideboard</h1></header><div class="form pphoto">';
+    if (metaMsg) { html += '<p class="small" role="status" aria-live="polite"><strong>' + esc(metaMsg) + '</strong></p>'; metaMsg = ''; }
+    if (meta) {
+      var n = 0; Object.keys(meta.decks).forEach(function (k) { n += meta.decks[k].length; });
+      html += '<p class="small"><strong>' + n + ' matchups</strong> de ' + Object.keys(meta.decks).length + ' arquétipos · ' + esc(meta.fonte || 'fonte não informada') + ' · dados de ' + esc(meta.data || fmtDate(meta.at)) + '. Ficam só neste aparelho.</p>';
+    } else html += '<p class="small muted">Sem dados ainda. Peça à sua IA: ela lê o MTG Decks e devolve os winrates dos seus decks contra o meta.</p>';
+    html += '<section aria-labelledby="m1"><h2 id="m1" class="ph-h"><span aria-hidden="true">1</span>Atualizar com IA</h2>' +
+      '<p class="small muted">Escolha com qual IA abrir. O pedido já vai preenchido. Ela devolve um link: toque nele e os dados entram aqui.</p>' +
+      '<div class="aibtns">' + AIS.filter(function (a) { return a[0] !== 'gemini'; }).map(function (a, i) { return '<button type="button" class="btn' + (i ? '' : ' primary') + '" data-mai="' + a[0] + '">Abrir com ' + a[1] + '</button>'; }).join('') + '</div>' +
+      '<button type="button" class="btn full" data-mcopy style="margin-top:8px">' + ICON.copy + 'Só copiar o pedido</button></section>' +
+      '<section aria-labelledby="m2"><h2 id="m2" class="ph-h"><span aria-hidden="true">2</span>Ou cole a resposta aqui</h2>' +
+      '<label for="mtext" class="visually-hidden">Resposta da IA</label><textarea id="mtext" spellcheck="false" autocapitalize="off" placeholder="PLAYSET-META v1&#10;fonte: MTG Decks&#10;data: 2026-11-19&#10;deck: Burn&#10;Stiflenought|26|50" style="margin-top:8px"></textarea>' +
+      '<p id="mErr" class="err" role="alert" style="margin-top:8px"></p>' +
+      '<button type="button" class="btn primary full" data-mimport style="margin-top:8px">Importar dados</button>' +
+      (meta ? '<button type="button" class="btn full" data-mclear style="margin-top:8px">Apagar os dados de matchup</button>' : '') + '</section></div>';
+    return html;
+  }
+  /* Cartão no fim do deck: até 3 piores matchups com 10+ partidas. */
+  function matchupCardHtml(d) {
+    if (d.format === 'Lista') return '';
+    var head = '<section class="sec" aria-labelledby="muH"><h2 class="sec-h" id="muH">Piores matchups</h2>';
+    var key = meta ? metaDeckKey(metaArch(d)) : null;
+    if (!key) {
+      var opts = meta ? Object.keys(meta.decks) : [];
+      return head + '<div class="card pad stack" style="margin:8px 16px 16px">' +
+        (meta ? '<p class="small">Qual arquétipo é este deck?</p><label for="archSel" class="visually-hidden">Arquétipo do deck</label><select id="archSel" class="field" data-arch="' + esc(d.id) + '"><option value="">Escolher…</option>' +
+          opts.map(function (o) { return '<option value="' + esc(o) + '">' + esc(o) + '</option>'; }).join('') + '</select>'
+          : '<p class="small">Veja onde este deck mais sofre e o que fazer no sideboard, com dados do MTG Decks.</p>') +
+        '<a class="btn primary full" href="#/meta">' + (meta ? 'Atualizar com IA' : 'Buscar dados com IA') + '</a></div></section>';
+    }
+    var rows = meta.decks[key];
+    var ok = rows.filter(function (r) { return r.n >= META_MIN; }).sort(function (a, b) { return a.wr - b.wr; });
+    var few = rows.length - ok.length;
+    var worst = ok.slice(0, 3);
+    var sel = '<label for="archSel" class="xs muted">Arquétipo</label><select id="archSel" class="field" data-arch="' + esc(d.id) + '">' +
+      Object.keys(meta.decks).map(function (o) { return '<option value="' + esc(o) + '"' + (o === key ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select>';
+    return head + '<div class="card pad stack" style="margin:8px 16px 16px">' +
+      (worst.length ? '<p class="small">De acordo com os dados, <strong>' + worst.map(function (r) { return esc(r.opp); }).join(', ') + '</strong> ' + (worst.length === 1 ? 'é o seu pior matchup' : 'são os seus piores matchups') + '. Toque para ver o que fazer no sideboard.</p>' +
+        '<ul class="menu">' + worst.map(function (r) {
+          return '<li><button data-sheet="mu" data-ctx="' + esc(d.id + '|' + r.opp) + '"><span>' + esc(r.opp) + '<small>seu deck vence ' + String(r.wr).replace('.', ',') + '% · ' + r.n + ' partidas</small></span></button></li>';
+        }).join('') + '</ul>' : '<p class="small"><strong>Poucos dados.</strong> Nenhum adversário tem ' + META_MIN + ' partidas ou mais.</p>') +
+      (few && worst.length ? '<p class="xs muted">' + few + (few === 1 ? ' adversário fora' : ' adversários fora') + ' por ter menos de ' + META_MIN + ' partidas (poucos dados).</p>' : '') +
+      sel + '<p class="xs muted">' + esc(meta.fonte || 'Fonte não informada') + ' · dados de ' + esc(meta.data || fmtDate(meta.at)) + '. <a href="#/meta">Atualizar</a></p></div></section>';
+  }
+  function muSheetHtml(ctx) {
+    var i = ctx.indexOf('|'), d = deckById(ctx.slice(0, i)), opp = ctx.slice(i + 1);
+    var key = d && meta ? metaDeckKey(metaArch(d)) : null;
+    var row = key ? meta.decks[key].filter(function (r) { return r.opp === opp; })[0] : null;
+    if (!row) return '<h2 id="sheetTitle">Sem dados</h2><p class="small muted">Atualize os dados de matchup.</p>';
+    var note = MU_NOTES[FU.norm(key) + '|' + FU.norm(opp)];
+    var h = '<h2 id="sheetTitle">' + esc(key) + ' contra ' + esc(opp) + '</h2>' +
+      '<p class="small">Seu deck vence <strong>' + String(row.wr).replace('.', ',') + '%</strong> em ' + row.n + ' partidas · ' + esc(meta.fonte || '') + ' · ' + esc(meta.data || '') + '.</p>';
+    if (note) {
+      h += '<h3 style="font-size:1rem;margin-top:12px">Sideboard</h3><p class="small">' + esc(note.txt) + '</p><ul class="menu">' +
+        note.links.map(function (l) { return '<li><a href="' + esc(l[1]) + '" target="_blank" rel="noopener"><span>' + esc(l[0]) + '<small>abre em outra aba</small></span></a></li>'; }).join('') + '</ul>';
+    } else {
+      h += '<p class="small muted" style="margin-top:12px">Ainda não tenho um guia guardado para este confronto. Pergunte à sua IA, já com o contexto:</p>' +
+        '<div class="aibtns">' + AIS.filter(function (a) { return a[0] !== 'gemini'; }).map(function (a) { return '<button type="button" class="btn" data-muai="' + a[0] + '" data-mq="' + esc(key + '|' + opp + '|' + row.wr) + '">Abrir com ' + a[1] + '</button>'; }).join('') + '</div>';
+    }
+    return h;
+  }
+  function muQuestion(q) {
+    var p = q.split('|');
+    return 'Jogo ' + p[0] + ' no Premodern. Contra ' + p[1] + ' meu winrate é ' + p[2] + '%. O que entra e o que sai do sideboard nesse confronto? Cite guias ou listas reais com link e data. Se não achar, diga que não achou e não invente.';
+  }
+
   /* ---------- roteamento ---------- */
   function route() {
-    var parts = (location.hash || '#/falta').replace(/^#\//, '').split('/');
+    var parts = (location.hash || '#/falta').replace(/\?.*$/, '').replace(/^#\//, '').split('/');
     return { name: parts[0] || 'falta', id: parts[1] };
   }
   function render() {
+    if (/^#\/meta\?d=/.test(location.hash || '')) metaFromHash();
     var r = route();
-    var tab = ({ troca: 'colecao', precos: 'mais', deck: 'decks', novo: 'decks', editar: 'decks', fonte: 'decks', foto: r.id === 'colecao' ? 'colecao' : 'decks' })[r.name] || r.name;
-    document.body.classList.toggle('home', ['decks', 'deck', 'novo', 'editar', 'mais', 'fonte', 'colecao', 'foto', 'precos', 'troca'].indexOf(r.name) === -1);
+    var tab = ({ troca: 'colecao', precos: 'mais', meta: 'mais', deck: 'decks', novo: 'decks', editar: 'decks', fonte: 'decks', foto: r.id === 'colecao' ? 'colecao' : 'decks' })[r.name] || r.name;
+    document.body.classList.toggle('home', ['decks', 'deck', 'novo', 'editar', 'mais', 'fonte', 'colecao', 'foto', 'precos', 'troca', 'meta'].indexOf(r.name) === -1);
     document.querySelectorAll('nav.tabs a').forEach(function (a) {
       if (a.getAttribute('data-tab') === tab) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     });
@@ -2126,7 +2289,7 @@
     var pip = mais.querySelector('.pip');
     if (needsBackup() && !pip) mais.insertAdjacentHTML('beforeend', '<span class="pip"></span><span class="visually-hidden"> (backup pendente)</span>');
     if (!needsBackup() && pip) { pip.nextElementSibling.remove(); pip.remove(); }
-    var titles = { falta: 'O que me falta', decks: 'Decks', mais: 'Mais', novo: 'Adicionar deck', editar: 'Editar deck', fonte: 'Adicionar fonte', colecao: 'Coleção', foto: 'Importar por foto', precos: 'Preços da Liga', troca: 'Modo troca' };
+    var titles = { falta: 'O que me falta', decks: 'Decks', mais: 'Mais', novo: 'Adicionar deck', editar: 'Editar deck', fonte: 'Adicionar fonte', colecao: 'Coleção', foto: 'Importar por foto', precos: 'Preços da Liga', troca: 'Modo troca', meta: 'Matchups e sideboard' };
     var d = r.name === 'deck' ? deckById(r.id) : null;
     document.title = (d ? d.name : (titles[r.name] || 'O que me falta')) + ' · Playset';
     if (r.name === 'decks') main.innerHTML = viewDecks();
@@ -2139,6 +2302,7 @@
     else if (r.name === 'foto') main.innerHTML = viewFoto(r.id);
     else if (r.name === 'precos') main.innerHTML = viewPrecos();
     else if (r.name === 'troca') main.innerHTML = viewTroca();
+    else if (r.name === 'meta') main.innerHTML = viewMeta();
     else main.innerHTML = viewFalta();
     heroStart();
   }
@@ -2171,6 +2335,7 @@
   });
 
   main.addEventListener('change', function (e) {
+    if (e.target.hasAttribute('data-arch')) { var ad = deckById(e.target.getAttribute('data-arch')); if (ad) { ad.arch = e.target.value; persist(true); var ya = window.scrollY; render(); window.scrollTo(0, ya); keepFocus('#archSel'); } return; }
     if (e.target.id === 'ptarget') { readPhotoInputs(); render(); keepFocus('#ptarget'); return; }
     if (e.target.id === 'si') { var f = e.target.files && e.target.files[0]; if (f) readImage(f); return; }
     if (e.target.hasAttribute('data-sortsel')) { state.ui.sort = e.target.value; persist(false); render(); keepFocus('#fSort'); return; }
@@ -2263,6 +2428,19 @@
       pd.pinned = !pd.pinned; persist(true); render(); keepFocus('[data-pin]');
       toast(pd.pinned ? 'Deck fixado no topo.' : 'Deck desafixado.'); return;
     }
+    if (t.hasAttribute('data-mai')) {
+      var mx = AIS.filter(function (a) { return a[0] === t.getAttribute('data-mai'); })[0];
+      copyText(metaPrompt(), 'Pedido copiado. Se a IA abrir vazia, é só colar.');
+      window.open(mx[2] + encodeURIComponent(metaPrompt()), '_blank', 'noopener');
+      return;
+    }
+    if (t.hasAttribute('data-mcopy')) { copyText(metaPrompt(), 'Pedido copiado. Cole na sua IA.'); return; }
+    if (t.hasAttribute('data-mimport')) {
+      var mt = document.getElementById('mtext'), me = document.getElementById('mErr'), mp = metaParse(mt ? mt.value : '');
+      if (mp.err) { me.textContent = mp.err; mt.focus(); return; }
+      metaSave(mp); metaMsg = 'Dados importados.'; render(); return;
+    }
+    if (t.hasAttribute('data-mclear')) { if (confirm('Apagar os dados de matchup deste aparelho?')) { meta = null; try { localStorage.removeItem(META_KEY); } catch (e) {} render(); toast('Dados apagados.'); } return; }
     if (t.hasAttribute('data-photo')) { location.hash = '#/foto/' + t.getAttribute('data-photo'); return; }
     if (t.hasAttribute('data-ctab')) { state.ui.colTab = t.getAttribute('data-ctab'); persist(false); render(); keepFocus('[data-ctab="' + state.ui.colTab + '"]'); return; }
     if (t.hasAttribute('data-pcopy')) { copyText(photoPrompt(), 'Prompt copiado. Cole na sua IA e mande a foto.'); return; }
