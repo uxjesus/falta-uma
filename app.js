@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.23.0';
+  var APP_VERSION = '0.23.1';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -2345,8 +2345,8 @@
   }
   function metaFetch(silent) {
     if (!navigator.onLine) { if (!silent) toast('Sem internet.'); return Promise.resolve(false); }
-    return fetch(SYNC_URL + 'meta?format=Premodern').then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
-      if (!j || !j.decks) { if (!silent) toast('O servidor ainda não tem dados. Tente mais tarde.'); return false; }
+    return fetch(SYNC_URL + 'meta?format=Premodern').then(function (r) { return r.json().catch(function () { return null; }); }).then(function (j) {
+      if (!j || !j.decks) { if (!silent) toast('O servidor ainda não tem dados.' + (j && j.err ? ' Motivo: ' + j.err : ' Tente mais tarde.')); return false; }
       var n = metaApplyServer(j);
       state.metaFetchAt = Date.now();
       persist(n > 0);

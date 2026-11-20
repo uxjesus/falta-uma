@@ -75,13 +75,16 @@ async function buildMeta(env, format) {
     (decks[x] = decks[x] || []).push({ opp: y, wr: Math.round((pair[k][0] / pair[k][1]) * 1000) / 10, n: pair[k][1] });
   }
   for (const x of Object.keys(decks)) decks[x].sort((a, b) => b.n - a.n);
-  return { fonte: "TopDeck.gg (topdeck.gg), últimos " + DAYS + " dias", data: new Date().toISOString().slice(0, 10), format, matches, decks };
+  return { events: (events || []).length, fonte: "TopDeck.gg (topdeck.gg), últimos " + DAYS + " dias", data: new Date().toISOString().slice(0, 10), format, matches, decks };
 }
 async function refreshAll(env) {
   const res = {};
   for (const f of FORMATS) {
-    try { const m = await buildMeta(env, f); await env.BACKUP.put("meta:" + f, JSON.stringify(m)); res[f] = m.matches; }
-    catch (e) { res[f] = "erro: " + e.message; }
+    try {
+      const m = await buildMeta(env, f);
+      if (!m.matches) throw new Error("TopDeck respondeu, mas sem partidas com deck identificado (" + m.events + " torneios)");
+      await env.BACKUP.put("meta:" + f, JSON.stringify(m)); await env.BACKUP.delete("meta-err:" + f); res[f] = m.matches;
+    } catch (e) { res[f] = "erro: " + e.message; await env.BACKUP.put("meta-err:" + f, String(e.message).slice(0, 300), { expirationTtl: 86400 }); }
   }
   return res;
 }
@@ -96,17 +99,17 @@ export default {
     if (url.pathname === "/meta" && req.method === "GET") {
       const f = url.searchParams.get("format") || "Premodern";
       const text = FORMATS.includes(f) ? await env.BACKUP.get("meta:" + f) : null;
-      /* Sem dado, ou dado com mais de 8 dias: tenta buscar agora (no máximo uma vez por hora), sem esperar o sábado. */
+      /* Sem dado, ou dado com mais de 8 dias: tenta buscar agora (no máximo uma vez a cada 10 minutos), sem esperar o sábado. */
       if (FORMATS.includes(f) && env.TOPDECK_KEY) {
         let old = true;
         try { old = !text || Date.now() - Date.parse(JSON.parse(text).data) > 8 * 86400000; } catch (e) {}
         if (old && !(await env.BACKUP.get("meta-try:" + f))) {
-          await env.BACKUP.put("meta-try:" + f, "1", { expirationTtl: 3600 });
+          await env.BACKUP.put("meta-try:" + f, "1", { expirationTtl: 600 });
           if (!text) { try { await refreshAll(env); const again = await env.BACKUP.get("meta:" + f); if (again) return new Response(again, { headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "no-store" } }); } catch (e) {} }
           else ctx.waitUntil(refreshAll(env));
         }
       }
-      return text ? new Response(text, { headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "public, max-age=3600" } }) : pub({ empty: true }, 404, "no-store");
+      return text ? new Response(text, { headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "public, max-age=3600" } }) : pub({ empty: true, err: (await env.BACKUP.get("meta-err:" + f)) || (env.TOPDECK_KEY ? null : "falta TOPDECK_KEY no servidor") }, 404, "no-store");
     }
     if (url.pathname === "/meta/refresh" && req.method === "POST") {
       const tk = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
