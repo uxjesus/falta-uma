@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.24.1';
+  var APP_VERSION = '0.25.0';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -1131,7 +1131,7 @@
 
     var html = '<section class="banner" style="' + (f ? '' : phStyle({ colors: deckColors(d) })) + '">' +
       (f ? '<img class="art" src="' + esc(artOf(f)) + '" alt="" decoding="async">' : '') + '<span class="shade"></span>' +
-      '<div class="info"><div class="toprow"><a href="#/decks" class="back">' + ICON.back + 'Decks</a>' +
+      '<div class="info"><div class="toprow"><a href="#/decks" class="back" data-goback>' + ICON.back + 'Decks</a>' +
         (d.format === 'Lista' ? '' : '<button class="pinbtn" data-pin="' + esc(d.id) + '" aria-pressed="' + (d.pinned ? 'true' : 'false') + '">' + ICO.pin + (d.pinned ? 'Fixado' : 'Fixar') + '</button>') + '</div>' +
       '<h1>' + esc(d.name) + '</h1>' +
       '<p style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="badge">' + esc(d.format || 'Sem formato') + '</span>' + pipsHtml(deckColors(d)) + (FU.deckComplete(d) ? '<span class="seal ok on-art">' + ICO.check + 'Completo</span>' : '') + '</p>' +
@@ -1330,7 +1330,7 @@
     var isList = d ? d.format === 'Lista' : !!asList;
     var formats = [['Premodern', 'Premodern'], ['Commander', 'Commander'], ['Pauper', 'Pauper'], ['Legacy', 'Legacy'], ['Modern', 'Modern'], ['Outro', 'Outro'], ['Lista', 'Lista de cartas avulsas']];
     var cur = d ? d.format : (isList ? 'Lista' : 'Premodern');
-    return '<header class="head"><a href="' + (d ? '#/deck/' + esc(d.id) : '#/decks') + '" class="link" style="margin-left:-4px">' + ICON.back + (d ? 'Voltar' : 'Decks') + '</a>' +
+    return '<header class="head"><a href="' + (d ? '#/deck/' + esc(d.id) : '#/decks') + '" class="link" style="margin-left:-4px" data-goback>' + ICON.back + (d ? 'Voltar' : 'Decks') + '</a>' +
       '<h1>' + (d ? (isList ? 'Editar lista' : 'Editar deck') : (isList ? 'Nova lista' : 'Adicionar deck')) + '</h1></header>' +
       '<form id="deckForm" class="form" novalidate data-id="' + (d ? esc(d.id) : '') + '">' +
       '<div><label for="dn">Nome</label><input type="text" id="dn" autocomplete="off" required placeholder="' + (isList ? 'Ex.: Avulsas, Upgrades do Commander' : 'Ex.: UG Madness') + '" value="' + (d ? esc(d.name) : '') + '"></div>' +
@@ -1418,21 +1418,6 @@
       catalogIdx = j && j.data ? FU.buildIndex(j.data) : null;
       return catalogIdx;
     });
-  }
-
-  var TESS = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
-  var tessLoading = null;
-  function loadTesseract() {
-    if (window.Tesseract) return Promise.resolve(window.Tesseract);
-    if (tessLoading) return tessLoading;
-    tessLoading = new Promise(function (ok, fail) {
-      var s = document.createElement('script');
-      s.src = TESS; s.async = true; s.crossOrigin = 'anonymous';
-      s.onload = function () { window.Tesseract ? ok(window.Tesseract) : fail(new Error('tess')); };
-      s.onerror = function () { tessLoading = null; fail(new Error('tess')); };
-      document.head.appendChild(s);
-    });
-    return tessLoading;
   }
 
   var SITES = [
@@ -1524,10 +1509,7 @@
       '<div id="srcHint" class="small" aria-live="polite">' + srcHint(draft.text) + '</div>' +
       '<p id="srcErr" class="err" role="alert">' + esc(draft.err) + '</p>' +
       '<button class="btn primary full" type="submit">Salvar fonte</button>' +
-      '<label class="btn full" for="si">' + KIND.image.icon + 'Anexar print de uma lista</label>' +
-      '<input type="file" id="si" accept="image/*" class="visually-hidden">' +
-      (draft.busy ? '<p class="small" role="status" aria-live="polite"><strong>' + esc(draft.busy) + '</strong></p>' : '') +
-      '<p class="xs muted">Print funciona melhor com lista em texto (Moxfield em modo texto, WhatsApp). Eu leio, corrijo os nomes e mostro para você revisar. Na primeira vez precisa de internet.</p></form>';
+      '<p class="xs muted">Para um print de lista, mande a imagem para a sua IA e cole aqui o texto que ela devolver.</p></form>';
     return html;
   }
   function srcHint(text) {
@@ -1588,7 +1570,7 @@
     persist(true);
     var names = cards.map(function (c) { return c.name; }).filter(function (n) { var i = cardInfo(n); return !i || !i.typeLine; });
     draft = null;
-    location.hash = '#/deck/' + d.id;
+    goReplace('#/deck/' + d.id);
     toast('Fonte adicionada.');
     if (names.length) refreshPrices({ only: names, silent: true });
   }
@@ -1626,39 +1608,6 @@
       if (res.rows.every(function (r) { return r.status === 'ok'; })) {
         saveDraftSource(res.rows.map(function (r) { return { name: r.name, qty: r.qty, board: r.board, owned: 0 }; }));
       } else { draft.rows = res.rows; draft.stage = 'review'; render(); window.scrollTo(0, 0); }
-    });
-  }
-
-  function readImage(file) {
-    readDraftInputs();
-    var s0 = FU.splitSource(draft.text);
-    draft.label = s0.label; draft.url = s0.url; draft.kind = 'image';
-    draft.err = ''; draft.busy = 'Preparando o leitor…'; render();
-    var worker;
-    Promise.all([loadTesseract(), loadCatalog()]).then(function (res) {
-      var T = res[0];
-      draft.catalogMissing = !res[1];
-      draft.busy = 'Lendo o print…'; render();
-      return T.createWorker('eng', 1, {
-        logger: function (m) {
-          if (m.status === 'recognizing text' && draft) {
-            var el = main.querySelector('[role=status] strong');
-            if (el) el.textContent = 'Lendo o print… ' + Math.round(m.progress * 100) + '%';
-          }
-        }
-      }).then(function (w) { worker = w; return w.recognize(file); }).then(function (r) {
-        if (worker) worker.terminate();
-        var text = FU.cleanOcr(r.data.text);
-        var out = buildRows(text, res[1] || knownIndex());
-        draft.busy = '';
-        if (!out.rows.length) { draft.err = 'Não consegui ler cartas nesse print. Tente um print da lista em modo texto, sem cortar as linhas.'; render(); return; }
-        draft.rows = out.rows; draft.stage = 'review'; render(); window.scrollTo(0, 0);
-      });
-    }).catch(function () {
-      if (worker) try { worker.terminate(); } catch (e) {}
-      draft.busy = '';
-      draft.err = navigator.onLine ? 'Não consegui ler o print. Tente de novo ou mande o print para o Claude.' : 'Para ler print, conecte à internet (só na primeira vez).';
-      render();
     });
   }
 
@@ -1801,7 +1750,7 @@
   function viewTroca() {
     barAction.innerHTML = ''; fab.innerHTML = '';
     var cv = ligaCoverage();
-    return '<header class="head"><a href="#/colecao" class="link" style="margin-left:-4px">' + ICON.back + 'Voltar</a><h1>Modo troca</h1>' +
+    return '<header class="head"><a href="#/colecao" class="link" style="margin-left:-4px" data-goback>' + ICON.back + 'Voltar</a><h1>Modo troca</h1>' +
       '<p class="metaline">' + cv.have + ' de ' + cv.total + ' cartas suas com preço da Liga salvo</p></header>' +
       '<div class="form"><label for="trIn" class="visually-hidden">Nome da carta</label>' +
       '<input type="search" id="trIn" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Nome da carta, em português ou inglês" value="' + esc(trQuery) + '"></div>' +
@@ -1849,7 +1798,7 @@
   function viewPrecos() {
     barAction.innerHTML = ''; fab.innerHTML = '';
     if (!lp) lp = { step: 'input', text: '', rows: null, busy: '', err: '', skipped: 0 };
-    var html = '<header class="head"><a href="#/mais" class="link" style="margin-left:-4px" data-droplp>' + ICON.back + 'Voltar</a><h1>Preços da Liga Magic</h1></header>';
+    var html = '<header class="head"><a href="#/mais" class="link" style="margin-left:-4px" data-droplp data-goback>' + ICON.back + 'Voltar</a><h1>Preços da Liga Magic</h1></header>';
     if (lp.step === 'review') return html + precosReviewHtml();
     var cv = ligaCoverage();
     html += '<div class="form pphoto">' +
@@ -1920,7 +1869,7 @@
     persist(true);
     lp = null;
     toast(n + (n === 1 ? ' preço da Liga salvo.' : ' preços da Liga salvos.'));
-    location.hash = '#/mais';
+    goReplace('#/mais');
     render();
   }
 
@@ -1946,7 +1895,7 @@
     barAction.innerHTML = ''; fab.innerHTML = '';
     if (!photo || photo.id !== id) photo = newPhoto(id);
     var back = id === 'colecao' ? '#/colecao' : (id && id !== 'novo' && deckById(id) ? '#/deck/' + esc(id) : '#/decks');
-    var html = '<header class="head"><a href="' + back + '" class="link" style="margin-left:-4px" data-dropphoto>' + ICON.back + 'Voltar</a><h1>Importar por foto</h1></header>';
+    var html = '<header class="head"><a href="' + back + '" class="link" style="margin-left:-4px" data-dropphoto data-goback>' + ICON.back + 'Voltar</a><h1>Importar por foto</h1></header>';
     if (photo.step === 'review') return html + photoReviewHtml();
     var fmts = ['Premodern', 'Commander', 'Pauper', 'Legacy', 'Modern', 'Outro'];
     var opts = '<option value="novo"' + (photo.target === 'novo' ? ' selected' : '') + '>Novo deck</option>' +
@@ -2106,7 +2055,7 @@
     persist(true); persistDb();
     var names = order.map(function (k) { return groups[k].name; }).filter(function (n) { var i = cardInfo(n); return !i || !i.typeLine; });
     photo = null;
-    location.hash = deck ? '#/deck/' + deck.id : '#/colecao';
+    goReplace(deck ? '#/deck/' + deck.id : '#/colecao');
     toast((created ? 'Deck criado. ' : '') + marked + (marked === 1 ? ' carta marcada' : ' cartas marcadas') + ' como “tenho”' + (extra ? ' · ' + extra + ' na Coleção' : '') + '.');
     if (names.length) refreshPrices({ only: names, silent: true });
   }
@@ -2173,8 +2122,8 @@
       try { history.replaceState(null, '', '#/meta'); } catch (e2) {}
     }
     if (!metaUi) metaUi = { text: '', err: '', parsed: null };
-    var html = '<header class="head"><a href="#/mais" class="link" style="margin-left:-4px" data-dropmeta>' + ICON.back + 'Voltar</a><h1>Importar winrates</h1></header>';
-    if (metaUi.parsed) return html + (metaUi.parsed.image ? metaImageReviewHtml() : metaReviewHtml());
+    var html = '<header class="head"><a href="#/mais" class="link" style="margin-left:-4px" data-dropmeta data-goback>' + ICON.back + 'Voltar</a><h1>Importar winrates</h1></header>';
+    if (metaUi.parsed) return html + (metaReviewHtml());
     var prem = premodernDecks(), noArch = prem.filter(function (d) { return !archOf(d); });
     var list = prem.length ? '<ul class="small" style="padding-left:20px">' + prem.map(function (d) { var a = archOf(d); return '<li>' + esc(d.name) + ' → ' + (a ? '<strong>' + esc(a) + '</strong>' : '<span style="color:var(--miss);font-weight:700">sem arquétipo (escolha no fim do deck)</span>') + '</li>'; }).join('') + '</ul>' : '<p class="small">Você ainda não tem deck Premodern. Crie um para ver os confrontos.</p>';
     html += '<div class="form pphoto">' +
@@ -2182,10 +2131,6 @@
       '<section aria-labelledby="m0"><h2 id="m0" class="ph-h">Atualizar agora</h2>' +
       '<p class="small muted">O servidor do Playset lê os torneios Premodern recentes do <a href="https://topdeck.gg" target="_blank" rel="noopener">TopDeck.gg</a> toda semana. O app confere sozinho uma vez por dia. Os números são de torneios; confira antes de decisões grandes.</p>' +
       '<button type="button" class="btn primary full" data-mfetch>' + ICON.refresh + 'Atualizar agora</button></section>' +
-      '<section aria-labelledby="m0b"><h2 id="m0b" class="ph-h">Ler de um print</h2>' +
-      '<p class="small muted">Tire um print da tabela de winrates de uma página (por exemplo, no MTG Decks) e escolha aqui. O app lê os números e mostra tudo ao lado do print para você conferir antes de salvar. Funciona com qualquer tabela de três colunas: nome, taxa em % e partidas.</p>' +
-      '<label class="btn full" for="mimg">' + ICO.cam + 'Escolher print da tabela</label><input type="file" id="mimg" accept="image/*" class="visually-hidden">' +
-      (metaUi.busy ? '<p class="small" role="status" aria-live="polite"><strong>' + esc(metaUi.busy) + '</strong></p>' : '') + '</section>' +
       '<section aria-labelledby="m1"><h2 id="m1" class="ph-h">Plano B: peça os dados para a sua IA</h2>' +
       '<p class="small muted">O pedido já vai com os seus decks. A IA lê o MTG Decks e devolve só números da página.</p>' + list +
       '<button type="button" class="btn primary full" data-mcopy style="margin-top:8px"' + (prem.length ? '' : ' disabled') + '>' + ICON.copy + 'Copiar pedido</button>' +
@@ -2227,89 +2172,6 @@
       } metaUi.err = 'Não encontrei nenhuma linha no formato Adversário|taxa|partidas. Confira se colou o bloco inteiro.'; render(); keepFocus('#mtext'); return; }
     metaUi.err = ''; metaUi.parsed = p; render();
   }
-  /* ---- print de tabela: lê por OCR, mostra ao lado da imagem para conferir e só então salva ---- */
-  function readMetaImage(file) {
-    if (!file) return;
-    if (!metaUi) metaUi = { text: '', err: '', parsed: null };
-    metaUi.err = ''; metaUi.busy = 'Preparando o leitor…'; render();
-    var worker;
-    loadTesseract().then(function (T) {
-      metaUi.busy = 'Lendo o print…'; render();
-      return T.createWorker('eng', 1, {
-        logger: function (m) {
-          if (m.status === 'recognizing text' && metaUi) { var el = main.querySelector('[role=status] strong'); if (el) el.textContent = 'Lendo o print… ' + Math.round(m.progress * 100) + '%'; }
-        }
-      }).then(function (w) { worker = w; return w.recognize(file); }).then(function (r) {
-        if (worker) worker.terminate();
-        var known = FU.META_ARCHS.concat(premodernDecks().map(archOf).filter(Boolean));
-        var p = FU.parseMetaImage(r.data.text, known);
-        metaUi.busy = '';
-        if (!p.rows) { metaUi.err = 'Não encontrei uma tabela nesse print. Tire o print com a tabela inteira, de frente e sem cortar as linhas.'; render(); return; }
-        var url = ''; try { url = URL.createObjectURL(file); } catch (e) {}
-        metaUi.imgUrl = url;
-        metaUi.parsed = { image: true, arch: metaUi.arch || p.arch || '', list: p.list, skipped: p.skipped, rows: p.rows, checkCount: p.checkCount, err: '' };
-        render(); window.scrollTo(0, 0);
-      });
-    }).catch(function () {
-      if (worker) try { worker.terminate(); } catch (e) {}
-      metaUi.busy = '';
-      metaUi.err = navigator.onLine ? 'Não consegui ler o print. Tente de novo, ou use o Plano B (sua IA).' : 'Para ler print, conecte à internet (só na primeira vez).';
-      render();
-    });
-  }
-  function metaImageReviewHtml() {
-    var p = metaUi.parsed;
-    var h = '<div class="form" style="gap:12px">' +
-      (metaUi.imgUrl ? '<img src="' + esc(metaUi.imgUrl) + '" alt="Print que você escolheu, para comparar com os números lidos" style="width:100%;max-height:40vh;object-fit:contain;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface)">' : '') +
-      '<p class="small">Li <strong>' + p.rows + (p.rows === 1 ? ' linha' : ' linhas') + '</strong>' +
-      (p.checkCount ? ', e <strong>' + p.checkCount + '</strong> ' + (p.checkCount === 1 ? 'precisa' : 'precisam') + ' da sua conferência (marcadas abaixo)' : '') +
-      (p.skipped.length ? '. Ignorei ' + p.skipped.length + (p.skipped.length === 1 ? ' linha' : ' linhas') + ' que não entendi' : '') + '.</p>' +
-      '<p class="small">Compare cada linha com o print. Corrija o que estiver errado ou toque em Tirar para apagar a linha.</p>' +
-      '<label for="rvArch" class="small"><strong>De qual deck é esta tabela?</strong></label>' +
-      '<select id="rvArch" class="field"><option value="">Escolher…</option>' + FU.META_ARCHS.map(function (a) { return '<option' + (FU.key(p.arch) === FU.key(a) ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') + '</select>' +
-      '<ul class="rv-rows" style="list-style:none;padding:0;display:grid;gap:10px">';
-    p.list.forEach(function (r, i) {
-      h += '<li class="rv-row" style="display:grid;grid-template-columns:1fr 76px 76px;gap:6px;align-items:center;border:1px solid var(--line-strong);border-radius:8px;padding:8px">' +
-        '<label class="visually-hidden" for="rn' + i + '">Adversário da linha ' + (i + 1) + '</label><input id="rn' + i + '" class="field" data-rv="o" value="' + esc(r.o) + '" autocapitalize="off" spellcheck="false">' +
-        '<label class="visually-hidden" for="rw' + i + '">Taxa de vitória, em porcentagem, da linha ' + (i + 1) + '</label><input id="rw' + i + '" class="field" data-rv="wr" inputmode="decimal" value="' + r.wr + '" aria-describedby="rvu">' +
-        '<label class="visually-hidden" for="rp' + i + '">Partidas da linha ' + (i + 1) + '</label><input id="rp' + i + '" class="field" data-rv="n" inputmode="numeric" value="' + r.n + '">' +
-        '<div style="grid-column:1/-1;display:flex;gap:8px;align-items:center;justify-content:space-between">' + (r.check ? chip('mid', 'Confira esta linha') : '<span></span>') +
-        '<button type="button" class="btn" data-rvdel="' + i + '" style="min-height:44px">Tirar</button></div></li>';
-    });
-    h += '</ul><p id="rvu" class="xs muted">Colunas: adversário, taxa em %, partidas.</p>' +
-      '<p id="rvErr" class="err" role="alert">' + esc(p.err || '') + '</p>' +
-      '<p class="xs muted">Estes números vêm de um site de terceiros e a leitura do print pode errar. Confira com o site antes de decidir algo grande. Se for passar para amigos, peça a eles que também conferam. O MTG Decks pede uso pessoal dos dados.</p>' +
-      '<button type="button" class="btn primary full" data-rvsave>Salvar no app</button>' +
-      '<button type="button" class="btn full" data-mback>Descartar e voltar</button></div>';
-    return h;
-  }
-  function metaCollectEdits() {
-    var p = metaUi.parsed, rows = [], seen = {};
-    var sel = document.getElementById('rvArch'); p.arch = sel ? sel.value : p.arch;
-    var items = main.querySelectorAll('.rv-row');
-    for (var i = 0; i < items.length; i++) {
-      var o = items[i].querySelector('[data-rv="o"]').value.trim(), wr = parseFloat(String(items[i].querySelector('[data-rv="wr"]').value).replace(',', '.')), n = parseInt(items[i].querySelector('[data-rv="n"]').value, 10);
-      if (!o || !isFinite(wr) || wr < 0 || wr > 100 || !(n >= 1)) { p.err = 'Linha ' + (i + 1) + ': confira o nome, a taxa (0 a 100) e as partidas (1 ou mais).'; p.list = rowsFromDom(); return false; }
-      if (seen[FU.key(o)]) { p.err = 'Linha ' + (i + 1) + ': "' + o + '" aparece duas vezes. Tire uma delas.'; p.list = rowsFromDom(); return false; }
-      seen[FU.key(o)] = 1; rows.push({ o: o.slice(0, 60), wr: Math.round(wr * 10) / 10, n: n });
-    }
-    if (!rows.length) { p.err = 'Não sobrou nenhuma linha.'; return false; }
-    if (!p.arch) { p.err = 'Escolha de qual deck é a tabela.'; p.list = rowsFromDom(); return false; }
-    p.err = ''; p.edited = rows; return true;
-  }
-  function rowsFromDom() {
-    var out = [], p = metaUi.parsed, items = main.querySelectorAll('.rv-row');
-    for (var i = 0; i < items.length; i++) out.push({ o: items[i].querySelector('[data-rv="o"]').value, wr: items[i].querySelector('[data-rv="wr"]').value, n: items[i].querySelector('[data-rv="n"]').value, check: p.list[i] ? p.list[i].check : false });
-    return out;
-  }
-  function metaSaveImage() {
-    var p = metaUi.parsed;
-    if (!metaCollectEdits()) { render(); var e = document.getElementById('rvErr'); if (e) e.focus && e.focus(); return; }
-    var dk = {}; dk[p.arch] = p.edited;
-    metaUi.parsed = { date: null, source: 'Print de tabela de site (conferido por você)', decks: dk, rows: p.edited.length, skipped: [] };
-    if (metaUi.imgUrl) { try { URL.revokeObjectURL(metaUi.imgUrl); } catch (e2) {} metaUi.imgUrl = ''; }
-    metaSave();
-  }
   function metaSave() {
     var p = metaUi && metaUi.parsed; if (!p) return;
     var date = p.date || todayStr();
@@ -2322,7 +2184,7 @@
     });
     persist(true);
     metaUi = null;
-    location.hash = '#/mais';
+    goReplace('#/mais');
     toast('Dados de confronto salvos.');
   }
   /* Dados do servidor (TopDeck.gg, atualizados toda semana). Só troca um deck se o dado do servidor for mais novo que o salvo. */
@@ -2360,18 +2222,6 @@
       return true;
     }).catch(function () { if (!silent) toast('Não consegui falar com o servidor.'); return false; });
   }
-  /* Quem usou a versão 0.21/0.22 de outra sessão guardou os dados em outra chave: traz para cá uma vez. */
-  (function metaMigrateLegacy() {
-    try {
-      var raw = localStorage.getItem('fu.meta.v1'); if (!raw) return;
-      var old = JSON.parse(raw);
-      if (old && old.decks && !(state.meta && state.meta.decks && Object.keys(state.meta.decks).length)) {
-        metaApplyServer({ fonte: old.fonte, data: old.data, decks: old.decks });
-        persist(true);
-      }
-      localStorage.removeItem('fu.meta.v1');
-    } catch (e) {}
-  })();
   setTimeout(function () { if (premodernDecks().length && (!state.metaFetchAt || Date.now() - state.metaFetchAt > META_AUTO_MS)) metaFetch(true); }, 1500);
   function collLookup() {
     var m = {}; collectionData().forEach(function (r) { m[FU.key(r.name)] = r; });
@@ -2484,8 +2334,18 @@
     heroStart();
   }
   var lastRoute = null;
+  /* Voltar de verdade: conta quantas telas o app já abriu nesta sessão. Com 1 ou mais, o botão Voltar volta ao histórico (a tela em que a pessoa estava); com 0, vai para a tela-mãe do link. */
+  var navDepth = 0, replacing = false;
+  function goReplace(h) { replacing = true; setTimeout(function () { replacing = false; }, 400); location.replace(h); }
+  function trackNav() {
+    var st = null; try { st = history.state; } catch (e) {}
+    var wasReplace = replacing; replacing = false;
+    if (st && typeof st.fu === 'number') navDepth = st.fu;
+    else { navDepth = lastRoute === null ? 0 : (wasReplace ? navDepth : navDepth + 1); try { history.replaceState({ fu: navDepth }, '', location.href); } catch (e2) {} }
+  }
   function onRoute() {
     var key = location.hash;
+    trackNav();
     render();
     if (key !== lastRoute) { window.scrollTo(0, 0); main.focus({ preventScroll: true }); }
     lastRoute = key;
@@ -2517,9 +2377,7 @@
       if (ad) { if (e.target.value) ad.arch = e.target.value; else delete ad.arch; persist(true); render(); keepFocus('#muArch'); }
       return;
     }
-    if (e.target.id === 'mimg') { var mf = e.target.files && e.target.files[0]; if (mf) readMetaImage(mf); return; }
     if (e.target.id === 'ptarget') { readPhotoInputs(); render(); keepFocus('#ptarget'); return; }
-    if (e.target.id === 'si') { var f = e.target.files && e.target.files[0]; if (f) readImage(f); return; }
     if (e.target.hasAttribute('data-sortsel')) { state.ui.sort = e.target.value; persist(false); render(); keepFocus('#fSort'); return; }
     if (!e.target.hasAttribute('data-filter')) return;
     state.ui.deck = e.target.value; persist(false); render(); keepFocus('#fDeck');
@@ -2538,6 +2396,8 @@
     if (e.target.closest('[data-dropphoto]')) photo = null;
     if (e.target.closest('[data-droplp]')) lp = null;
     if (e.target.closest('[data-dropmeta]')) metaUi = null;
+    var gb = e.target.closest('a[data-goback]');
+    if (gb && navDepth > 0 && !e.defaultPrevented && !e.metaKey && !e.ctrlKey) { e.preventDefault(); history.back(); return; }
     var aca = e.target.closest('[data-acadd]');
     if (aca && main.contains(aca)) { acAdd(aca.getAttribute('data-acadd')); return; }
     if (e.target.closest('[data-acgo]')) { acGo(); return; }
@@ -2623,16 +2483,10 @@
       return;
     }
     if (t.hasAttribute('data-mfetch')) { metaFetch(false); return; }
-    if (t.hasAttribute('data-rvsave')) { metaSaveImage(); return; }
-    if (t.hasAttribute('data-rvdel')) {
-      var ri = parseInt(t.getAttribute('data-rvdel'), 10), rp = metaUi && metaUi.parsed; if (!rp) return;
-      rp.arch = (document.getElementById('rvArch') || {}).value || rp.arch; rp.list = rowsFromDom(); rp.list.splice(ri, 1); rp.rows = rp.list.length;
-      render(); keepFocus('.rv-row [data-rv="o"]'); return;
-    }
     if (t.hasAttribute('data-mcopy')) { copyText(metaPrompt(), 'Pedido copiado. Cole na sua IA.'); return; }
     if (t.hasAttribute('data-mai')) { var mai = AIS.filter(function (a) { return a[0] === t.getAttribute('data-mai'); })[0]; openAi(mai, metaPrompt(), 'Pedido copiado. Se a IA abrir vazia, é só colar.'); return; }
     if (t.hasAttribute('data-mread')) { metaRead(); return; }
-    if (t.hasAttribute('data-mback')) { if (metaUi.imgUrl) { try { URL.revokeObjectURL(metaUi.imgUrl); } catch (e3) {} metaUi.imgUrl = ''; } metaUi.parsed = null; render(); keepFocus('#mtext'); return; }
+    if (t.hasAttribute('data-mback')) { metaUi.parsed = null; render(); keepFocus('#mtext'); return; }
     if (t.hasAttribute('data-msave')) { metaSave(); return; }
     if (t.hasAttribute('data-mclear')) { if (confirm('Apagar os dados de confronto salvos? Os decks não mudam.')) { delete state.meta; persist(true); render(); toast('Dados apagados.'); } return; }
     if (t.hasAttribute('data-photo')) { location.hash = '#/foto/' + t.getAttribute('data-photo'); return; }
@@ -2694,7 +2548,7 @@
         deck.cards.forEach(function (c) { putSpare(c.name, c.owned || 0, c.eds); });
         state.decks = state.decks.filter(function (x) { return x.id !== id; });
         persist(true);
-        location.hash = '#/decks';
+        goReplace('#/decks');
         toast('Excluído.');
       }
     } else if (act === 'example') {
@@ -2772,7 +2626,7 @@
       if (markAll) FU.markAllOwned(deck.cards);
       persist(true);
     }
-    location.hash = '#/deck/' + deck.id;
+    goReplace('#/deck/' + deck.id);
     toast((format === 'Lista' ? (id ? 'Lista atualizada.' : 'Lista salva.') : (id ? 'Deck atualizado.' : 'Deck salvo.')) + (parsed.skipped.length ? ' Ignorei ' + parsed.skipped.length + ' linha(s) que não eram cartas.' : ''));
     var fresh = deck.cards.map(function (c) { return c.name; }).filter(function (n) { var i = cardInfo(n); return !i || !i.typeLine; });
     if (fresh.length) refreshPrices({ only: fresh, silent: true });
@@ -3047,7 +2901,7 @@
       else if (data.pr) { db.pr = db.pr || {}; Object.keys(data.pr).forEach(function (k) { db.pr[k] = data.pr[k]; }); }
       persist(false); persistDb();
       backupMsg = 'Backup de ' + when + ' importado.';
-      location.hash = '#/decks';
+      goReplace('#/decks');
       render();
       toast('Backup importado.');
       return true;
@@ -3065,7 +2919,7 @@
     state.ui = state.ui || { sort: 'name', deck: 'all', view: {} };
     persist(false);
     backupMsg = 'Voltei os decks para a cópia de ' + fmtDate(sn.at) + '.';
-    location.hash = '#/decks';
+    goReplace('#/decks');
     render();
     toast('Cópia restaurada.');
   }

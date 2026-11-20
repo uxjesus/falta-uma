@@ -359,20 +359,6 @@
     return fuzzy ? { name: fuzzy.name, status: 'fixed' } : { name: raw, status: 'unknown' };
   }
 
-  /* Limpa o texto lido de um print: tira preço, símbolos soltos e lixo comum. */
-  function cleanOcr(text) {
-    return String(text || '').split('\n').map(function (l) {
-      return l
-        .replace(/[|•·»«©®™_]+/g, ' ')
-        .replace(/(R\$|US\$|\$|€)\s*[\d.,]+/gi, ' ')
-        .replace(/\s[\d]+[.,]\d{2}\s*$/, ' ')
-        .replace(/^\s*[-*–—]+\s*/, '')
-        .replace(/^\s*([0-9OoIl]{1,2})\s*[xX×]?\s+/, function (_, q) { return q.replace(/[Oo]/g, '0').replace(/[Il]/g, '1') + ' '; })
-        .replace(/\s{2,}/g, ' ')
-        .trim();
-    }).filter(Boolean).join('\n');
-  }
-
   /* Um campo só na Pesquisa: separa link, nome (texto solto) e lista de cartas. */
   var HEAD_RE = /^(deck|main|maindeck|main deck|mainboard|sideboard|side|sb|commander|comandante|maybeboard|maybe|considering)\s*:?$/i;
   function splitSource(text) {
@@ -596,57 +582,6 @@
     for (var i = 0; i < bin.length; i++) bytes.push('%' + ('00' + bin.charCodeAt(i).toString(16)).slice(-2));
     return decodeURIComponent(bytes.join(''));
   }
-  /* Print de tabela (nome | taxa % | partidas) lido por OCR: conserta os erros comuns de leitura de número
-     e marca com check=true toda linha que precisou de conserto, para o app pedir conferência. */
-  var OCR_DIGIT = { O: '0', o: '0', l: '1', I: '1', '|': '1', S: '5', B: '8' };
-  function fixDigits(tok) { return tok.replace(/[OolISB]/g, function (c) { return OCR_DIGIT[c]; }); }
-  function cleanMetaOcr(text) {
-    var changed = {}, lines = [];
-    String(text || '').replace(/\r/g, '').split('\n').forEach(function (raw) {
-      var l = raw.replace(/[¦_\[\]{}“”"‘’`´]/g, ' ').replace(/‰/g, '%')
-        .replace(/(^|\s)[+=:~—–•·*«»<>.,;-]+(?=\s|\d|$)/g, ' ')          // sinais soltos que o OCR inventa entre colunas
-        .replace(/(\d)\s*(matches?|partidas?|jogos)\b/gi, '$1 $2')
-        .replace(/(matches?|partidas?|jogos)[^\w]*$/i, '$1')
-        .replace(/\s+/g, ' ').trim(), orig = l;
-      if (!l) return;
-      // número da taxa: tem % colado, ou tem ao menos um algarismo de verdade
-      l = l.replace(/(^|[\s|])([0-9OolISB]{1,4}(?:[.,][0-9OolISB]{1,2})?)\s?%/g, function (m, pre, num) { return pre + fixDigits(num) + '%'; });
-      // contagem no fim: "34 matches" com a palavra estragada pelo OCR
-      if (/%/.test(l)) l = l.replace(/(\d+|[0-9OolIS]{1,5})\s+[A-Za-z]{4,9}\s*$/, function (m, num) { return fixDigits(num) + ' matches'; });
-      if (l !== orig && /%/.test(l)) changed[l] = true;
-      lines.push(l);
-    });
-    return { text: lines.join('\n'), changed: changed };
-  }
-  function lev(a, b) {
-    var m = a.length, n = b.length, d = [], i, j;
-    for (i = 0; i <= m; i++) { d[i] = [i]; }
-    for (j = 1; j <= n; j++) d[0][j] = j;
-    for (i = 1; i <= m; i++) for (j = 1; j <= n; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-    return d[m][n];
-  }
-  function snapName(raw, known) {
-    var k = key(raw), best = null, bd = 99;
-    if (!k) return { name: raw, snapped: false };
-    for (var i = 0; i < known.length; i++) {
-      var kk = key(known[i]);
-      if (kk === k) return { name: known[i], snapped: false };
-      var dist = lev(k, kk), lim = Math.max(1, Math.floor(Math.max(k.length, kk.length) * 0.2));
-      if (dist <= lim && dist < bd) { bd = dist; best = known[i]; }
-    }
-    return best ? { name: best, snapped: true } : { name: raw, snapped: false };
-  }
-  function parseMetaImage(ocrText, known) {
-    var c = cleanMetaOcr(ocrText), tb = parseMetaTable(c.text);
-    var list = tb.list.map(function (r) {
-      var sn = snapName(r.o.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9)]+$/g, ''), known || []);
-      var odd = /[^A-Za-z0-9 '\-+&.\/]/.test(sn.name) || sn.name.length < 2;
-      var fixed = Object.keys(c.changed).some(function (ln) { return ln.indexOf(r.o) === 0 && new RegExp('\\b' + r.wr + '%').test(ln); });
-      return { o: sn.name, wr: r.wr, n: r.n, check: sn.snapped || odd || fixed || r.n > 5000 };
-    });
-    return { arch: tb.arch, list: list, rows: list.length, skipped: tb.skipped, checkCount: list.filter(function (r) { return r.check; }).length };
-  }
-
   function b64urlEncode(s) {
     var bin = unescape(encodeURIComponent(String(s)));
     var b = (typeof btoa === 'function' ? btoa : function (x) { return Buffer.from(x, 'binary').toString('base64'); })(bin);
@@ -714,12 +649,12 @@
 
   var api = {
     META_MIN: META_MIN, META_SMALL: META_SMALL, META_STALE_DAYS: META_STALE_DAYS, META_ARCHS: META_ARCHS,
-    suggestArch: suggestArch, parseMeta: parseMeta, parseMetaTable: parseMetaTable, cleanMetaOcr: cleanMetaOcr, parseMetaImage: parseMetaImage, snapName: snapName, b64urlDecode: b64urlDecode, b64urlEncode: b64urlEncode,
+    suggestArch: suggestArch, parseMeta: parseMeta, parseMetaTable: parseMetaTable, b64urlDecode: b64urlDecode, b64urlEncode: b64urlEncode,
     metaEntry: metaEntry, metaSplit: metaSplit, metaAgeDays: metaAgeDays, sideNote: sideNote, noteCardStatus: noteCardStatus,
     parsePriceBR: parsePriceBR, parseLigaPrices: parseLigaPrices,
     edsSum: edsSum, edsMerge: edsMerge, edsTake: edsTake, edsPop: edsPop,
     splitSource: splitSource, markOwned: markOwned,
-    consensus: consensus, buildIndex: buildIndex, matchName: matchName, resolveName: resolveName, cleanOcr: cleanOcr, norm: norm,
+    consensus: consensus, buildIndex: buildIndex, matchName: matchName, resolveName: resolveName, norm: norm,
     typeGroup: typeGroup, GROUP_ORDER: GROUP_ORDER, parseMana: parseMana, toText: toText, mergeOwned: mergeOwned,
     parseList: parseList, aggregateMissing: aggregateMissing, deckProgress: deckProgress, deckComplete: deckComplete, heroPool: heroPool, markAllOwned: markAllOwned, sortDecks: sortDecks,
     toLigaMagic: toLigaMagic, isBasic: isBasic, key: key, missingOf: missingOf,
