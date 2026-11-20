@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.21.1';
+  var APP_VERSION = '0.22.0';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -2188,6 +2188,19 @@
     history.replaceState(null, '', '#/meta');
   }
   var metaMsg = '';
+  /* Dados do servidor (TopDeck.gg, atualizados toda semana). Troca só os arquétipos que vieram. */
+  var META_AUTO_MS = 24 * 60 * 60 * 1000;
+  function metaFetch(silent) {
+    if (!navigator.onLine) { if (!silent) toast('Sem internet.'); return Promise.resolve(false); }
+    return fetch(SYNC_URL + 'meta?format=Premodern').then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+      if (!j || !j.decks) { if (!silent) toast('O servidor ainda não tem dados. Tente mais tarde.'); return false; }
+      metaSave({ fonte: j.fonte, data: j.data, decks: j.decks });
+      if (!silent) { metaMsg = 'Dados atualizados.'; }
+      if (route().name === 'meta' || route().name === 'deck') { var y = window.scrollY; render(); window.scrollTo(0, y); }
+      return true;
+    }).catch(function () { if (!silent) toast('Não consegui falar com o servidor.'); return false; });
+  }
+  setTimeout(function () { if (!meta || !meta.at || Date.now() - meta.at > META_AUTO_MS) metaFetch(true); }, 1500);
   function metaPrompt() {
     var names = {};
     state.decks.forEach(function (d) { if (d.format === 'Premodern') { var a = metaArch(d); if (a) names[a] = 1; } });
@@ -2215,9 +2228,12 @@
       var n = 0; Object.keys(meta.decks).forEach(function (k) { n += meta.decks[k].length; });
       html += '<p class="small"><strong>' + n + ' matchups</strong> de ' + Object.keys(meta.decks).length + ' arquétipos · ' + esc(meta.fonte || 'fonte não informada') + ' · dados de ' + esc(meta.data || fmtDate(meta.at)) + '. Ficam só neste aparelho.</p>';
     } else html += '<p class="small muted">Sem dados ainda. Peça à sua IA: ela lê o MTG Decks e devolve os winrates dos seus decks contra o meta.</p>';
-    html += '<section aria-labelledby="m1"><h2 id="m1" class="ph-h"><span aria-hidden="true">1</span>Atualizar com IA</h2>' +
+    html += '<section aria-labelledby="m0"><h2 id="m0" class="ph-h">Atualizar agora</h2><p class="small muted">O servidor busca os torneios novos toda semana. Toque para trazer o que ele já tem.</p>' +
+      '<button type="button" class="btn primary full" data-mfetch style="margin-top:8px">' + ICON.refresh + 'Atualizar dados</button>' +
+      '<p class="xs muted" style="margin-top:8px">Dados: <a href="https://topdeck.gg" target="_blank" rel="noopener">TopDeck.gg</a></p></section>' +
+      '<section aria-labelledby="m1"><h2 id="m1" class="ph-h"><span aria-hidden="true">1</span>Plano B: atualizar com IA</h2>' +
       '<p class="small muted">Escolha com qual IA abrir. O pedido já vai preenchido. Ela devolve um link: toque nele e os dados entram aqui.</p>' +
-      '<div class="aibtns">' + AIS.filter(function (a) { return a[0] !== 'gemini'; }).map(function (a, i) { return '<button type="button" class="btn' + (i ? '' : ' primary') + '" data-mai="' + a[0] + '">Abrir com ' + a[1] + '</button>'; }).join('') + '</div>' +
+      '<div class="aibtns">' + AIS.filter(function (a) { return a[0] !== 'gemini'; }).map(function (a, i) { return '<button type="button" class="btn' + '" data-mai="' + a[0] + '">Abrir com ' + a[1] + '</button>'; }).join('') + '</div>' +
       '<button type="button" class="btn full" data-mcopy style="margin-top:8px">' + ICON.copy + 'Só copiar o pedido</button></section>' +
       '<section aria-labelledby="m2"><h2 id="m2" class="ph-h"><span aria-hidden="true">2</span>Ou cole a resposta aqui</h2>' +
       '<label for="mtext" class="visually-hidden">Resposta da IA</label><textarea id="mtext" spellcheck="false" autocapitalize="off" placeholder="PLAYSET-META v1&#10;fonte: MTG Decks&#10;data: 2026-11-19&#10;deck: Burn&#10;Stiflenought|26|50" style="margin-top:8px"></textarea>' +
@@ -2251,7 +2267,7 @@
           return '<li><button data-sheet="mu" data-ctx="' + esc(d.id + '|' + r.opp) + '"><span>' + esc(r.opp) + '<small>seu deck vence ' + String(r.wr).replace('.', ',') + '% · ' + r.n + ' partidas</small></span></button></li>';
         }).join('') + '</ul>' : '<p class="small"><strong>Poucos dados.</strong> Nenhum adversário tem ' + META_MIN + ' partidas ou mais.</p>') +
       (few && worst.length ? '<p class="xs muted">' + few + (few === 1 ? ' adversário fora' : ' adversários fora') + ' por ter menos de ' + META_MIN + ' partidas (poucos dados).</p>' : '') +
-      sel + '<p class="xs muted">' + esc(meta.fonte || 'Fonte não informada') + ' · dados de ' + esc(meta.data || fmtDate(meta.at)) + '. <a href="#/meta">Atualizar</a></p></div></section>';
+      sel + '<p class="xs muted">' + esc(meta.fonte || 'Fonte não informada') + ' · dados de ' + esc(meta.data || fmtDate(meta.at)) + '. <a href="#/meta">Atualizar</a>' + (/topdeck/i.test(meta.fonte || '') ? ' · Dados: <a href="https://topdeck.gg" target="_blank" rel="noopener">TopDeck.gg</a>' : '') + '</p></div></section>';
   }
   function muSheetHtml(ctx) {
     var i = ctx.indexOf('|'), d = deckById(ctx.slice(0, i)), opp = ctx.slice(i + 1);
@@ -2437,6 +2453,7 @@
       window.open(mx[2] + encodeURIComponent(metaPrompt()), '_blank', 'noopener');
       return;
     }
+    if (t.hasAttribute('data-mfetch')) { metaFetch(false).then(function (ok) { if (ok) render(); }); return; }
     if (t.hasAttribute('data-mcopy')) { copyText(metaPrompt(), 'Pedido copiado. Cole na sua IA.'); return; }
     if (t.hasAttribute('data-mimport')) {
       var mt = document.getElementById('mtext'), me = document.getElementById('mErr'), mp = metaParse(mt ? mt.value : '');
