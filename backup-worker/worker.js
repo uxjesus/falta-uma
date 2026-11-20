@@ -90,12 +90,22 @@ const pub = (obj, status = 200, cache = "public, max-age=3600") =>
 
 export default {
   async scheduled(event, env, ctx) { ctx.waitUntil(refreshAll(env)); },
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
     const url = new URL(req.url);
     if (url.pathname === "/meta" && req.method === "GET") {
       const f = url.searchParams.get("format") || "Premodern";
       const text = FORMATS.includes(f) ? await env.BACKUP.get("meta:" + f) : null;
+      /* Sem dado, ou dado com mais de 8 dias: tenta buscar agora (no máximo uma vez por hora), sem esperar o sábado. */
+      if (FORMATS.includes(f) && env.TOPDECK_KEY) {
+        let old = true;
+        try { old = !text || Date.now() - Date.parse(JSON.parse(text).data) > 8 * 86400000; } catch (e) {}
+        if (old && !(await env.BACKUP.get("meta-try:" + f))) {
+          await env.BACKUP.put("meta-try:" + f, "1", { expirationTtl: 3600 });
+          if (!text) { try { await refreshAll(env); const again = await env.BACKUP.get("meta:" + f); if (again) return new Response(again, { headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "no-store" } }); } catch (e) {} }
+          else ctx.waitUntil(refreshAll(env));
+        }
+      }
       return text ? new Response(text, { headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "public, max-age=3600" } }) : pub({ empty: true }, 404, "no-store");
     }
     if (url.pathname === "/meta/refresh" && req.method === "POST") {
