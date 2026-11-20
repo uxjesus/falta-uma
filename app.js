@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.23.1';
+  var APP_VERSION = '0.24.0';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -2139,7 +2139,7 @@
       'Para cada um, abra a página do arquétipo no MTG Decks (mtgdecks.net/Premodern, página do arquétipo, aba de winrates) e leia a tabela de taxa de vitória contra os outros decks.',
       'Inclua estes adversários, menos o próprio deck: ' + FU.META_ARCHS.join(', ') + '.',
       'Para cada adversário, anote a taxa de vitória do MEU deck contra ele e o número de partidas. Se a tabela for do adversário, inverta (100 menos o valor). Inclua também os de poucas partidas, com o número real de partidas.',
-      'Responda SOMENTE neste formato, dentro de um único bloco de código:',
+      'IMPORTANTE: devolva o resultado dentro de UM ÚNICO bloco de código (três crases), sem nenhum texto dentro dele, para eu tocar no botão de copiar do bloco e colar no app. Toda explicação fica fora do bloco. Formato:',
       'PLAYSET-META v1\nfonte: MTG Decks (mtgdecks.net/Premodern)\ndata: ' + todayStr() + '\ndeck: (nome do meu arquétipo)\nAdversário|taxa de vitória %|partidas',
       'Regras: use só números que estão na página, nunca estime nem invente. Se uma página não abrir ou não tiver a tabela, diga qual e peça para eu colar o texto ou um print da tabela. Sem explicações dentro do bloco.',
       'Se você tiver ferramenta de código, mostre depois do bloco também o link https://uxjesus.github.io/falta-uma/#/meta?d= seguido do bloco em base64url. Sem ferramenta de código, não tente gerar o link.'
@@ -2158,10 +2158,10 @@
     return 'Dados salvos de ' + ks.length + (ks.length === 1 ? ' deck' : ' decks') + ' · mais recente: ' + metaDateText(last) + '.';
   }
   function metaSectionHtml() {
-    return '<section class="card pad stack" aria-labelledby="mg"><h2 id="mg" style="font-size:1.0625rem">Metagame e confrontos</h2>' +
+    return '<section class="card pad stack" aria-labelledby="mg"><h2 id="mg" style="font-size:1.0625rem">Importar winrates</h2>' +
       '<p class="muted small">O app busca sozinho a taxa de vitória dos seus decks Premodern contra os decks mais jogados (TopDeck.gg). O resultado aparece no fim de cada deck, com a data.</p>' +
       '<p class="small"><strong>' + esc(metaSummaryLine()) + '</strong></p>' +
-      '<a class="btn primary full" href="#/meta">Abrir</a></section>';
+      '<a class="btn primary full" href="#/meta">Importar winrates</a></section>';
   }
   function viewMeta() {
     barAction.innerHTML = ''; fab.innerHTML = '';
@@ -2173,7 +2173,7 @@
       try { history.replaceState(null, '', '#/meta'); } catch (e2) {}
     }
     if (!metaUi) metaUi = { text: '', err: '', parsed: null };
-    var html = '<header class="head"><a href="#/mais" class="link" style="margin-left:-4px" data-dropmeta>' + ICON.back + 'Voltar</a><h1>Metagame e confrontos</h1></header>';
+    var html = '<header class="head"><a href="#/mais" class="link" style="margin-left:-4px" data-dropmeta>' + ICON.back + 'Voltar</a><h1>Importar winrates</h1></header>';
     if (metaUi.parsed) return html + (metaUi.parsed.image ? metaImageReviewHtml() : metaReviewHtml());
     var prem = premodernDecks(), noArch = prem.filter(function (d) { return !archOf(d); });
     var list = prem.length ? '<ul class="small" style="padding-left:20px">' + prem.map(function (d) { var a = archOf(d); return '<li>' + esc(d.name) + ' → ' + (a ? '<strong>' + esc(a) + '</strong>' : '<span style="color:var(--miss);font-weight:700">sem arquétipo (escolha no fim do deck)</span>') + '</li>'; }).join('') + '</ul>' : '<p class="small">Você ainda não tem deck Premodern. Crie um para ver os confrontos.</p>';
@@ -2391,6 +2391,7 @@
       'Meu deck principal:\n' + deckLines(d, false),
       'Meu sideboard:\n' + deckLines(d, true),
       'Cartas que eu tenho fora dos decks (coleção):\n' + spare,
+      'IMPORTANTE: pesquise guias, listas de torneio e discussões (fóruns, Reddit, Discord público) e devolva o plano dentro de UM ÚNICO bloco de código (três crases), no formato abaixo, para eu tocar no botão de copiar. Toda explicação fica fora do bloco.\nFormato do bloco:\nENTRA:\n<quantidade> <carta> | <motivo curto> | <fonte e data>\nSAI:\n<quantidade> <carta> | <motivo curto>\nNÃO TENHO:\n<carta> | <motivo>',
       'Regras:\n1. Diga o que TIRAR e o que COLOCAR, mantendo 60 cartas no principal e 15 no sideboard.\n2. Use SÓ cartas do meu deck, do meu sideboard ou da minha coleção. Se uma carta muito boa não estiver em nenhuma, coloque-a numa lista à parte marcada "você não tem".\n3. Cada sugestão com a fonte (link) e a data. Marque como "inferência" o que for raciocínio seu e não vier de uma fonte.\n4. Com menos de 30 partidas, diga que o número é só uma pista. Se não achar fontes boas, diga isso em vez de inventar.\n5. Explique em passos curtos, em português.'
     ].join('\n\n');
   }
@@ -2415,29 +2416,32 @@
   function matchupCard(d) {
     if (d.format !== 'Premodern') return '';
     var arch = archOf(d), auto = FU.suggestArch(d.name);
-    var h = '<section class="card pad stack mu" aria-labelledby="muH" style="margin:16px"><h2 id="muH" style="font-size:1.0625rem">Piores matchups</h2>' +
-      '<div><label for="muArch" class="small"><strong>Arquétipo do deck</strong></label>' +
+    var h = '<section class="card pad stack mu" aria-labelledby="muH" style="margin:16px"><h2 id="muH" style="font-size:1.0625rem">Confrontos do deck</h2>' +
+      '<details class="small"' + (arch ? '' : ' open') + '><summary style="min-height:44px;display:flex;align-items:center;cursor:pointer"><span>' + (arch ? 'Reconheci como <strong>' + esc(arch) + '</strong> · trocar' : '<strong>Não reconheci o arquétipo</strong> · escolha') + '</span></summary>' +
+      '<label for="muArch" class="visually-hidden">Arquétipo do deck</label>' +
       '<select id="muArch" class="field" data-arch="' + esc(d.id) + '" style="margin-top:4px"><option value="">' + (auto ? 'Automático (' + esc(auto) + ')' : 'Escolher…') + '</option>' +
-      FU.META_ARCHS.map(function (a) { return '<option' + (d.arch === a ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') + '</select></div>';
+      FU.META_ARCHS.map(function (a) { return '<option' + (d.arch === a ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') + '</select></details>';
     var e = arch ? FU.metaEntry(state.meta, arch) : null;
-    if (!arch) return h + '<p class="small">Escolha o arquétipo acima para ver os confrontos.</p></section>';
-    if (!e) return h + '<p class="small">Sem dados de confronto para <strong>' + esc(arch) + '</strong> ainda.</p><a class="btn primary full" href="#/meta">Atualizar com IA</a></section>';
-    var age = FU.metaAgeDays(e.date), sp = FU.metaSplit(e.rows);
+    if (!arch) return h + '</section>';
+    if (!e) return h + '<p class="small">Ainda sem winrates para <strong>' + esc(arch) + '</strong>.</p><a class="btn primary full" href="#/meta">Importar winrates</a></section>';
+    var age = FU.metaAgeDays(e.date), sp = FU.metaSplit(e.rows), asc = !state.ui.muBest;
     h += '<p class="small" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">Dados de <strong>' + esc(metaDateText(e.date)) + '</strong> · ' + esc(e.source || 'MTG Decks') +
       (age != null && age > FU.META_STALE_DAYS ? '<span class="seal warn">' + ICO_WARN + 'Desatualizado (' + age + ' dias)</span>' : '') + '</p>';
     if (!sp.ok.length) {
-      h += '<p class="small"><strong>Poucos dados:</strong> nenhum confronto com ' + FU.META_MIN + ' partidas ou mais.</p>' +
-        (sp.few.length ? '<ul class="small" style="padding-left:20px">' + sp.few.slice(0, 3).map(function (r) { return '<li>' + esc(r.o) + ': ' + r.wr + '% em ' + r.n + ' partidas</li>'; }).join('') + '</ul>' : '');
+      h += '<p class="small"><strong>Poucos dados:</strong> nenhum confronto com ' + FU.META_MIN + ' partidas ou mais.</p>';
     } else {
-      if (!sp.bad.length) h += '<p class="small">Nenhum confronto abaixo de 50% com ' + FU.META_MIN + '+ partidas. Estes são os de menor taxa:</p>';
-      sp.ok.slice(0, 3).forEach(function (r) {
+      var list = asc ? sp.ok : sp.ok.slice().reverse();
+      h += '<button type="button" class="btn full" data-musort aria-label="Inverter a ordem. Agora: ' + (asc ? 'piores primeiro' : 'melhores primeiro') + '">' + svg('<path d="M7 4v16M3 16l4 4 4-4M17 20V4M13 8l4-4 4 4"/>') + (asc ? 'Piores primeiro · toque para inverter' : 'Melhores primeiro · toque para inverter') + '</button>' +
+        (sp.bad.length ? '' : '<p class="small">Nenhum confronto abaixo de 50% com ' + FU.META_MIN + '+ partidas.</p>');
+      list.forEach(function (r) {
         var id = d.id + '|' + r.o, open = !!muOpen[id];
         h += '<button type="button" class="mu-row" data-mu="' + esc(id) + '" aria-expanded="' + open + '"><span class="o">' + esc(r.o) + '</span><span class="w">' + r.wr + '%</span>' +
-          '<span class="s">' + r.n + ' partidas' + (r.n < FU.META_SMALL ? ' · amostra pequena' : '') + ' · toque para ver o que fazer</span></button>' + (open ? matchupPanel(d, arch, r, e.date) : '');
+          '<span class="s">' + (r.wr < 50 ? 'confronto ruim · ' : '') + r.n + ' partidas' + (r.n < FU.META_SMALL ? ' · amostra pequena' : '') + ' · toque para ver o que fazer</span></button>' + (open ? matchupPanel(d, arch, r, e.date) : '');
       });
-      if (sp.few.length) h += '<p class="xs muted">' + sp.few.length + (sp.few.length === 1 ? ' confronto' : ' confrontos') + ' com menos de ' + FU.META_MIN + ' partidas: poucos dados, não entram na lista.</p>';
     }
-    return h + '<a class="btn full" href="#/meta">Atualizar dados</a></section>';
+    if (sp.few.length) h += '<details class="small"><summary style="min-height:44px;display:flex;align-items:center;cursor:pointer">' + sp.few.length + (sp.few.length === 1 ? ' confronto' : ' confrontos') + ' com poucos dados (menos de ' + FU.META_MIN + ' partidas)</summary><ul style="padding-left:20px">' +
+      sp.few.map(function (r) { return '<li>' + esc(r.o) + ': ' + r.wr + '% em ' + r.n + ' partidas</li>'; }).join('') + '</ul></details>';
+    return h + '<a class="btn full" href="#/meta">Importar winrates</a></section>';
   }
 
   /* ---------- roteamento ---------- */
@@ -2457,7 +2461,7 @@
     var pip = mais.querySelector('.pip');
     if (needsBackup() && !pip) mais.insertAdjacentHTML('beforeend', '<span class="pip"></span><span class="visually-hidden"> (backup pendente)</span>');
     if (!needsBackup() && pip) { pip.nextElementSibling.remove(); pip.remove(); }
-    var titles = { falta: 'O que me falta', decks: 'Decks', mais: 'Mais', novo: 'Adicionar deck', editar: 'Editar deck', fonte: 'Adicionar fonte', colecao: 'Coleção', foto: 'Importar por foto', precos: 'Preços da Liga', troca: 'Modo troca', meta: 'Metagame e confrontos' };
+    var titles = { falta: 'O que me falta', decks: 'Decks', mais: 'Mais', novo: 'Adicionar deck', editar: 'Editar deck', fonte: 'Adicionar fonte', colecao: 'Coleção', foto: 'Importar por foto', precos: 'Preços da Liga', troca: 'Modo troca', meta: 'Importar winrates' };
     var d = r.name === 'deck' ? deckById(r.id) : null;
     document.title = (d ? d.name : (titles[r.name] || 'O que me falta')) + ' · Playset';
     if (r.name === 'decks') main.innerHTML = viewDecks();
@@ -2602,6 +2606,7 @@
       pd.pinned = !pd.pinned; persist(true); render(); keepFocus('[data-pin]');
       toast(pd.pinned ? 'Deck fixado no topo.' : 'Deck desafixado.'); return;
     }
+    if (t.hasAttribute('data-musort')) { state.ui.muBest = !state.ui.muBest; persist(false); var ys = window.scrollY; render(); window.scrollTo(0, ys); keepFocus('[data-musort]'); return; }
     if (t.hasAttribute('data-mu')) { var mk = t.getAttribute('data-mu'); muOpen[mk] = !muOpen[mk]; render(); keepFocus('[data-mu="' + mk.replace(/"/g, '\\"') + '"]'); return; }
     if (t.hasAttribute('data-muai') || t.hasAttribute('data-mucopy')) {
       var mv = (t.getAttribute('data-muai') || t.getAttribute('data-mucopy')).split('|'), md = deckById(mv[0]);
