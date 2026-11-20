@@ -17,20 +17,24 @@ const out = (obj, status = 200) =>
 const FORMATS = ["Premodern"];
 const DAYS = 90;
 const MIN_TOTAL = 30; // arquétipo com menos partidas que isso no período não entra
+const META_V = 2; // sobe quando a tabela de nomes muda: dado de versão antiga é refeito na próxima leitura
+/* O TopDeck nomeia os decks com cores na frente ("Azorius Standstill", "Mono Blue Stiflenought", "5 Color Gro-A-Tog",
+   "Wurg Terragedon"). Aqui o nome vira o do app pela palavra que identifica o deck, não pelo nome inteiro.
+   Variantes de cor do mesmo deck somam juntas. Ordem importa: a primeira regra que bater vale. */
 const ALIAS = [
-  [/^(mono[ -]?red )?(sligh|burn)$|^mono[ -]?red$|^red burn$/, "Burn"],
-  [/^(uw|wu|white blue|blue white) (land ?still|landstill|control)$|^land ?still$/, "Landstill"],
-  [/^(ug|gu|blue green|green blue) madness$|^madness$/, "Madness"],
-  [/^psychatog$|^(ub|bu) (tog|psychatog)$|^tog$/, "Psychatog"],
-  [/^stiflenought$|^(uw|wu) stiflenought$/, "Stiflenought"],
-  [/^goblins?$|^mono[ -]?red goblins?$/, "Goblins"],
-  [/^enchantress$|^(gw|wg) enchantress$/, "Enchantress"],
-  [/^oath( ponza)?$|^oath ponza$/, "Oath Ponza"],
-  [/^replenish$/, "Replenish"],
-  [/^stasis$/, "Stasis"],
-  [/^terrageddon$/, "Terrageddon"],
-  [/^mono[ -]?black( control)?$/, "Mono Black"],
-  [/^(full english breakfast|feb)$/, "Full English Breakfast"],
+  [/stiflenought/, "Stiflenought"],
+  [/stand ?still|land ?still/, "Landstill"],
+  [/gro-? ?a-? ?tog|psychatog/, "Psychatog"],
+  [/madness/, "Madness"],
+  [/enchantress/, "Enchantress"],
+  [/goblins?/, "Goblins"],
+  [/terrag?e?ddon|terragedon/, "Terrageddon"],
+  [/replenish/, "Replenish"],
+  [/\boath\b/, "Oath Ponza"],
+  [/\bstasis\b/, "Stasis"],
+  [/full english|^feb$/, "Full English Breakfast"],
+  [/^mono[ -]?black$/, "Mono Black"],
+  [/^(mono[ -]?red( aggro| burn)?|burn|sligh|red burn)$/, "Burn"],
 ];
 function normArch(raw) {
   const k = String(raw || "").toLowerCase().replace(/[^a-z0-9 +-]/g, " ").replace(/\s+/g, " ").trim();
@@ -48,6 +52,7 @@ async function buildMeta(env, format) {
   const events = await r.json();
   const pair = {}; // "A|B" -> [vitórias de A sobre B, partidas]
   const total = {};
+  const nomes = {}; // "nome no TopDeck => nome no app": ajuda a achar nome novo sem reconhecer
   let matches = 0;
   for (const ev of events || []) {
     for (const rd of ev.rounds || []) {
@@ -55,6 +60,7 @@ async function buildMeta(env, format) {
         if (t.status !== "Completed" || !t.winner_id || t.winner_id === "Draw" || !t.players || t.players.length !== 2) continue;
         const [p1, p2] = t.players;
         const a1 = normArch(p1.archetype), a2 = normArch(p2.archetype);
+        for (const [rw, nm] of [[p1.archetype, a1], [p2.archetype, a2]]) if (nm) { const kk = rw + " => " + nm; nomes[kk] = (nomes[kk] || 0) + 1; }
         if (!a1 || !a2) continue;
         const w = p1.id === t.winner_id ? a1 : a2, l = p1.id === t.winner_id ? a2 : a1;
         matches++;
@@ -75,7 +81,7 @@ async function buildMeta(env, format) {
     (decks[x] = decks[x] || []).push({ opp: y, wr: Math.round((pair[k][0] / pair[k][1]) * 1000) / 10, n: pair[k][1] });
   }
   for (const x of Object.keys(decks)) decks[x].sort((a, b) => b.n - a.n);
-  return { events: (events || []).length, fonte: "TopDeck.gg (topdeck.gg), últimos " + DAYS + " dias", data: new Date().toISOString().slice(0, 10), format, matches, decks };
+  return { v: META_V, events: (events || []).length, fonte: "TopDeck.gg (topdeck.gg), últimos " + DAYS + " dias", data: new Date().toISOString().slice(0, 10), format, matches, decks, nomes };
 }
 async function refreshAll(env) {
   const res = {};
@@ -101,15 +107,15 @@ export default {
       const text = FORMATS.includes(f) ? await env.BACKUP.get("meta:" + f) : null;
       /* Sem dado, ou dado com mais de 8 dias: tenta buscar agora (no máximo uma vez a cada 10 minutos), sem esperar o sábado. */
       if (FORMATS.includes(f) && env.TOPDECK_KEY) {
-        let old = true;
-        try { old = !text || Date.now() - Date.parse(JSON.parse(text).data) > 8 * 86400000; } catch (e) {}
+        let old = true, wrongV = !text;
+        try { const j = JSON.parse(text || "null"); wrongV = !j || j.v !== META_V; old = wrongV || Date.now() - Date.parse(j.data) > 8 * 86400000; } catch (e) {}
         if (old && !(await env.BACKUP.get("meta-try:" + f))) {
           await env.BACKUP.put("meta-try:" + f, "1", { expirationTtl: 600 });
-          if (!text) { try { await refreshAll(env); const again = await env.BACKUP.get("meta:" + f); if (again) return new Response(again, { headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "no-store" } }); } catch (e) {} }
+          if (wrongV) { try { await refreshAll(env); const again = await env.BACKUP.get("meta:" + f); if (again) return new Response(again, { headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "no-store" } }); } catch (e) {} }
           else ctx.waitUntil(refreshAll(env));
         }
       }
-      return text ? new Response(text, { headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "public, max-age=3600" } }) : pub({ empty: true, err: (await env.BACKUP.get("meta-err:" + f)) || (env.TOPDECK_KEY ? null : "falta TOPDECK_KEY no servidor") }, 404, "no-store");
+      return text ? new Response(text, { headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "no-cache" } }) : pub({ empty: true, err: (await env.BACKUP.get("meta-err:" + f)) || (env.TOPDECK_KEY ? null : "falta TOPDECK_KEY no servidor") }, 404, "no-store");
     }
     if (url.pathname === "/meta/refresh" && req.method === "POST") {
       const tk = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();

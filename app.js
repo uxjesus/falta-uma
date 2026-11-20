@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.24.0';
+  var APP_VERSION = '0.24.1';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -2331,6 +2331,11 @@
   function metaApplyServer(j) {
     var changed = 0; state.meta = state.meta || { decks: {} }; state.meta.decks = state.meta.decks || {};
     var date = /^\d{4}-\d{2}-\d{2}$/.test(j.data || '') ? j.data : todayStr();
+    /* Nomes que o servidor deixou de usar (ex.: trocou a tabela de nomes) não ficam sobrando no aparelho. */
+    Object.keys(state.meta.decks).forEach(function (x) {
+      var e = state.meta.decks[x];
+      if (e && /^TopDeck\.gg/.test(e.source || '') && !Object.keys(j.decks).some(function (k) { return FU.key(k) === FU.key(x); })) delete state.meta.decks[x];
+    });
     Object.keys(j.decks).forEach(function (k) {
       var rows = (j.decks[k] || []).map(function (r) { return { o: String(r.opp), wr: Number(r.wr), n: Math.floor(Number(r.n)) }; })
         .filter(function (r) { return r.o && isFinite(r.wr) && r.wr >= 0 && r.wr <= 100 && r.n > 0; });
