@@ -294,7 +294,7 @@
     }).sort(function (a, b) { return b.count - a.count || a.name.localeCompare(b.name); });
   }
 
-  /* Distância de edição (para corrigir nomes lidos no print). */
+  /* Distância de edição (para casar nomes com a lista oficial de cartas). */
   function lev(a, b, max) {
     if (Math.abs(a.length - b.length) > max) return max + 1;
     var prev = [], cur, i, j;

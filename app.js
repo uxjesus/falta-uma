@@ -1131,7 +1131,7 @@
 
     var html = '<section class="banner" style="' + (f ? '' : phStyle({ colors: deckColors(d) })) + '">' +
       (f ? '<img class="art" src="' + esc(artOf(f)) + '" alt="" decoding="async">' : '') + '<span class="shade"></span>' +
-      '<div class="info"><div class="toprow"><a href="#/decks" class="back" data-goback>' + ICON.back + 'Decks</a>' +
+      '<div class="info"><div class="toprow"><a href="#/decks" class="back" data-goback>' + ICON.back + 'Voltar</a>' +
         (d.format === 'Lista' ? '' : '<button class="pinbtn" data-pin="' + esc(d.id) + '" aria-pressed="' + (d.pinned ? 'true' : 'false') + '">' + ICO.pin + (d.pinned ? 'Fixado' : 'Fixar') + '</button>') + '</div>' +
       '<h1>' + esc(d.name) + '</h1>' +
       '<p style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="badge">' + esc(d.format || 'Sem formato') + '</span>' + pipsHtml(deckColors(d)) + (FU.deckComplete(d) ? '<span class="seal ok on-art">' + ICO.check + 'Completo</span>' : '') + '</p>' +
@@ -1330,7 +1330,7 @@
     var isList = d ? d.format === 'Lista' : !!asList;
     var formats = [['Premodern', 'Premodern'], ['Commander', 'Commander'], ['Pauper', 'Pauper'], ['Legacy', 'Legacy'], ['Modern', 'Modern'], ['Outro', 'Outro'], ['Lista', 'Lista de cartas avulsas']];
     var cur = d ? d.format : (isList ? 'Lista' : 'Premodern');
-    return '<header class="head"><a href="' + (d ? '#/deck/' + esc(d.id) : '#/decks') + '" class="link" style="margin-left:-4px" data-goback>' + ICON.back + (d ? 'Voltar' : 'Decks') + '</a>' +
+    return '<header class="head"><a href="' + (d ? '#/deck/' + esc(d.id) : '#/decks') + '" class="link" style="margin-left:-4px" data-goback>' + ICON.back + 'Voltar' + '</a>' +
       '<h1>' + (d ? (isList ? 'Editar lista' : 'Editar deck') : (isList ? 'Nova lista' : 'Adicionar deck')) + '</h1></header>' +
       '<form id="deckForm" class="form" novalidate data-id="' + (d ? esc(d.id) : '') + '">' +
       '<div><label for="dn">Nome</label><input type="text" id="dn" autocomplete="off" required placeholder="' + (isList ? 'Ex.: Avulsas, Upgrades do Commander' : 'Ex.: UG Madness') + '" value="' + (d ? esc(d.name) : '') + '"></div>' +
@@ -2119,7 +2119,7 @@
       metaUi = { text: '', err: '', parsed: null };
       try { metaUi.text = FU.b64urlDecode(m[1]); metaUi.parsed = FU.parseMeta(metaUi.text); if (!metaUi.parsed.rows) { metaUi.err = 'O link veio sem dados que eu consiga ler.'; metaUi.parsed = null; } }
       catch (e) { metaUi.err = 'Não consegui abrir os dados desse link. Cole o texto que a IA mandou no passo 2.'; }
-      try { history.replaceState(null, '', '#/meta'); } catch (e2) {}
+      try { history.replaceState({ fu: navDepth, prev: curPrev }, '', '#/meta'); } catch (e2) {}
     }
     if (!metaUi) metaUi = { text: '', err: '', parsed: null };
     var html = '<header class="head"><a href="#/mais" class="link" style="margin-left:-4px" data-dropmeta data-goback>' + ICON.back + 'Voltar</a><h1>Importar winrates</h1></header>';
@@ -2335,13 +2335,22 @@
   }
   var lastRoute = null;
   /* Voltar de verdade: conta quantas telas o app já abriu nesta sessão. Com 1 ou mais, o botão Voltar volta ao histórico (a tela em que a pessoa estava); com 0, vai para a tela-mãe do link. */
-  var navDepth = 0, replacing = false;
-  function goReplace(h) { replacing = true; setTimeout(function () { replacing = false; }, 400); location.replace(h); }
+  var navDepth = 0, curPrev = '', replacing = false;
+  /* Depois de salvar/excluir: se a tela anterior já é o destino, volta para ela (evita duas entradas iguais no histórico); senão troca a entrada atual. */
+  function goReplace(h) {
+    if (navDepth > 0 && curPrev === h) { history.back(); return; }
+    replacing = true; setTimeout(function () { replacing = false; }, 400); location.replace(h);
+  }
+  function stampNav() { try { history.replaceState({ fu: navDepth, prev: curPrev }, '', location.href); } catch (e2) {} }
   function trackNav() {
     var st = null; try { st = history.state; } catch (e) {}
     var wasReplace = replacing; replacing = false;
-    if (st && typeof st.fu === 'number') navDepth = st.fu;
-    else { navDepth = lastRoute === null ? 0 : (wasReplace ? navDepth : navDepth + 1); try { history.replaceState({ fu: navDepth }, '', location.href); } catch (e2) {} }
+    if (st && typeof st.fu === 'number') { navDepth = st.fu; curPrev = st.prev || ''; }
+    else {
+      if (lastRoute === null) { navDepth = 0; curPrev = ''; }
+      else if (!wasReplace) { navDepth += 1; curPrev = lastRoute; }
+      stampNav();
+    }
   }
   function onRoute() {
     var key = location.hash;
@@ -2975,7 +2984,7 @@
   if (/[?&]shared=1/.test(location.search) && window.caches) {
     caches.open('fu-share').then(function (c) {
       return c.match('share-inbox').then(function (res) {
-        try { history.replaceState(null, '', location.pathname + '#/mais'); } catch (e) {}
+        try { history.replaceState({ fu: navDepth, prev: curPrev }, '', location.pathname + '#/mais'); } catch (e) {}
         if (!res) { location.hash = '#/mais'; setBackupMsg('Não recebi nenhum arquivo. Tente compartilhar de novo.', 'Sem arquivo.', true); return; }
         return res.text().then(function (text) {
           return c.delete('share-inbox').then(function () { location.hash = '#/mais'; return restoreFromText(text); });
