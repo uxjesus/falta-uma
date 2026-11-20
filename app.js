@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.21.0';
+  var APP_VERSION = '0.23.0';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -2159,9 +2159,9 @@
   }
   function metaSectionHtml() {
     return '<section class="card pad stack" aria-labelledby="mg"><h2 id="mg" style="font-size:1.0625rem">Metagame e confrontos</h2>' +
-      '<p class="muted small">Sua IA busca a taxa de vitória dos seus decks Premodern contra os decks mais jogados. O resultado aparece no fim de cada deck, com a data.</p>' +
+      '<p class="muted small">O app busca sozinho a taxa de vitória dos seus decks Premodern contra os decks mais jogados (TopDeck.gg). O resultado aparece no fim de cada deck, com a data.</p>' +
       '<p class="small"><strong>' + esc(metaSummaryLine()) + '</strong></p>' +
-      '<a class="btn primary full" href="#/meta">Atualizar com IA</a></section>';
+      '<a class="btn primary full" href="#/meta">Abrir</a></section>';
   }
   function viewMeta() {
     barAction.innerHTML = ''; fab.innerHTML = '';
@@ -2179,12 +2179,15 @@
     var list = prem.length ? '<ul class="small" style="padding-left:20px">' + prem.map(function (d) { var a = archOf(d); return '<li>' + esc(d.name) + ' → ' + (a ? '<strong>' + esc(a) + '</strong>' : '<span style="color:var(--miss);font-weight:700">sem arquétipo (escolha no fim do deck)</span>') + '</li>'; }).join('') + '</ul>' : '<p class="small">Você ainda não tem deck Premodern. Crie um para ver os confrontos.</p>';
     html += '<div class="form pphoto">' +
       '<p class="small">' + esc(metaSummaryLine()) + '</p>' +
-      '<section aria-labelledby="m1"><h2 id="m1" class="ph-h"><span aria-hidden="true">1</span>Peça os dados para a sua IA</h2>' +
+      '<section aria-labelledby="m0"><h2 id="m0" class="ph-h">Atualizar agora</h2>' +
+      '<p class="small muted">O servidor do Playset lê os torneios Premodern recentes do <a href="https://topdeck.gg" target="_blank" rel="noopener">TopDeck.gg</a> toda semana. O app confere sozinho uma vez por dia. Os números são de torneios; confira antes de decisões grandes.</p>' +
+      '<button type="button" class="btn primary full" data-mfetch>' + ICON.refresh + 'Atualizar agora</button></section>' +
+      '<section aria-labelledby="m1"><h2 id="m1" class="ph-h">Plano B: peça os dados para a sua IA</h2>' +
       '<p class="small muted">O pedido já vai com os seus decks. A IA lê o MTG Decks e devolve só números da página.</p>' + list +
       '<button type="button" class="btn primary full" data-mcopy style="margin-top:8px"' + (prem.length ? '' : ' disabled') + '>' + ICON.copy + 'Copiar pedido</button>' +
       '<div class="aibtns">' + AIS.map(function (a) { return '<button type="button" class="btn" data-mai="' + a[0] + '"' + (prem.length ? '' : ' disabled') + '>Copiar e abrir ' + a[1] + '</button>'; }).join('') + '</div>' +
       (noArch.length ? '<p class="xs err" style="margin-top:8px">Falta escolher o arquétipo de ' + noArch.length + (noArch.length === 1 ? ' deck' : ' decks') + '. Eles ficam de fora do pedido.</p>' : '') + '</section>' +
-      '<section aria-labelledby="m2"><h2 id="m2" class="ph-h"><span aria-hidden="true">2</span>Cole a resposta ou a tabela aqui</h2>' +
+      '<section aria-labelledby="m2"><h2 id="m2" class="ph-h"><span aria-hidden="true">1</span>Cole a resposta ou a tabela aqui</h2>' +
       '<p class="small muted">Cole o bloco que a IA mandou. Se a IA não conseguiu abrir alguma página, abra você a página do deck em mtgdecks.net/Premodern no Chrome, copie a tabela de winrates e cole abaixo: o app lê sozinho.</p>' +
       '<label for="march" class="small" style="display:block;margin-top:8px"><strong>Se for a tabela de uma página do site, de qual deck ela é?</strong></label>' +
       '<select id="march" class="field" style="margin-top:4px"><option value="">Escolher…</option>' + FU.META_ARCHS.map(function (a) { return '<option' + (metaUi.arch === a ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') + '</select>' +
@@ -2235,6 +2238,49 @@
     location.hash = '#/mais';
     toast('Dados de confronto salvos.');
   }
+  /* Dados do servidor (TopDeck.gg, atualizados toda semana). Só troca um deck se o dado do servidor for mais novo que o salvo. */
+  var META_AUTO_MS = 24 * 60 * 60 * 1000;
+  var TOPDECK_SRC = 'TopDeck.gg (topdeck.gg), servidor do Playset';
+  function metaApplyServer(j) {
+    var changed = 0; state.meta = state.meta || { decks: {} }; state.meta.decks = state.meta.decks || {};
+    var date = /^\d{4}-\d{2}-\d{2}$/.test(j.data || '') ? j.data : todayStr();
+    Object.keys(j.decks).forEach(function (k) {
+      var rows = (j.decks[k] || []).map(function (r) { return { o: String(r.opp), wr: Number(r.wr), n: Math.floor(Number(r.n)) }; })
+        .filter(function (r) { return r.o && isFinite(r.wr) && r.wr >= 0 && r.wr <= 100 && r.n > 0; });
+      if (!rows.length) return;
+      var old = Object.keys(state.meta.decks).filter(function (x) { return FU.key(x) === FU.key(k); })[0];
+      if (old && (state.meta.decks[old].date || '') > date) return;
+      if (old) delete state.meta.decks[old];
+      state.meta.decks[k] = { date: date, source: j.fonte || TOPDECK_SRC, savedAt: Date.now(), rows: rows };
+      changed++;
+    });
+    return changed;
+  }
+  function metaFetch(silent) {
+    if (!navigator.onLine) { if (!silent) toast('Sem internet.'); return Promise.resolve(false); }
+    return fetch(SYNC_URL + 'meta?format=Premodern').then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+      if (!j || !j.decks) { if (!silent) toast('O servidor ainda não tem dados. Tente mais tarde.'); return false; }
+      var n = metaApplyServer(j);
+      state.metaFetchAt = Date.now();
+      persist(n > 0);
+      if (!silent) toast(n ? 'Dados atualizados (' + n + (n === 1 ? ' deck).' : ' decks).') : 'Você já tem os dados mais novos.');
+      if (n && (route().name === 'meta' || route().name === 'deck' || route().name === 'mais')) { var y = window.scrollY; render(); window.scrollTo(0, y); }
+      return true;
+    }).catch(function () { if (!silent) toast('Não consegui falar com o servidor.'); return false; });
+  }
+  /* Quem usou a versão 0.21/0.22 de outra sessão guardou os dados em outra chave: traz para cá uma vez. */
+  (function metaMigrateLegacy() {
+    try {
+      var raw = localStorage.getItem('fu.meta.v1'); if (!raw) return;
+      var old = JSON.parse(raw);
+      if (old && old.decks && !(state.meta && state.meta.decks && Object.keys(state.meta.decks).length)) {
+        metaApplyServer({ fonte: old.fonte, data: old.data, decks: old.decks });
+        persist(true);
+      }
+      localStorage.removeItem('fu.meta.v1');
+    } catch (e) {}
+  })();
+  setTimeout(function () { if (premodernDecks().length && (!state.metaFetchAt || Date.now() - state.metaFetchAt > META_AUTO_MS)) metaFetch(true); }, 1500);
   function collLookup() {
     var m = {}; collectionData().forEach(function (r) { m[FU.key(r.name)] = r; });
     return function (n) { return m[FU.key(canonical(n))] || null; };
@@ -2304,7 +2350,7 @@
       });
       if (sp.few.length) h += '<p class="xs muted">' + sp.few.length + (sp.few.length === 1 ? ' confronto' : ' confrontos') + ' com menos de ' + FU.META_MIN + ' partidas: poucos dados, não entram na lista.</p>';
     }
-    return h + '<a class="btn full" href="#/meta">Atualizar com IA</a></section>';
+    return h + '<a class="btn full" href="#/meta">Atualizar dados</a></section>';
   }
 
   /* ---------- roteamento ---------- */
@@ -2478,6 +2524,7 @@
       if (t.hasAttribute('data-muai')) openAi(AIS[0], mp, 'Pedido copiado. Se a IA abrir vazia, é só colar.'); else copyText(mp, 'Pedido copiado. Cole na sua IA.');
       return;
     }
+    if (t.hasAttribute('data-mfetch')) { metaFetch(false); return; }
     if (t.hasAttribute('data-mcopy')) { copyText(metaPrompt(), 'Pedido copiado. Cole na sua IA.'); return; }
     if (t.hasAttribute('data-mai')) { var mai = AIS.filter(function (a) { return a[0] === t.getAttribute('data-mai'); })[0]; openAi(mai, metaPrompt(), 'Pedido copiado. Se a IA abrir vazia, é só colar.'); return; }
     if (t.hasAttribute('data-mread')) { metaRead(); return; }
