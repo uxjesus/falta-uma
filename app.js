@@ -2174,7 +2174,7 @@
     }
     if (!metaUi) metaUi = { text: '', err: '', parsed: null };
     var html = '<header class="head"><a href="#/mais" class="link" style="margin-left:-4px" data-dropmeta>' + ICON.back + 'Voltar</a><h1>Metagame e confrontos</h1></header>';
-    if (metaUi.parsed) return html + metaReviewHtml();
+    if (metaUi.parsed) return html + (metaUi.parsed.image ? metaImageReviewHtml() : metaReviewHtml());
     var prem = premodernDecks(), noArch = prem.filter(function (d) { return !archOf(d); });
     var list = prem.length ? '<ul class="small" style="padding-left:20px">' + prem.map(function (d) { var a = archOf(d); return '<li>' + esc(d.name) + ' → ' + (a ? '<strong>' + esc(a) + '</strong>' : '<span style="color:var(--miss);font-weight:700">sem arquétipo (escolha no fim do deck)</span>') + '</li>'; }).join('') + '</ul>' : '<p class="small">Você ainda não tem deck Premodern. Crie um para ver os confrontos.</p>';
     html += '<div class="form pphoto">' +
@@ -2182,6 +2182,10 @@
       '<section aria-labelledby="m0"><h2 id="m0" class="ph-h">Atualizar agora</h2>' +
       '<p class="small muted">O servidor do Playset lê os torneios Premodern recentes do <a href="https://topdeck.gg" target="_blank" rel="noopener">TopDeck.gg</a> toda semana. O app confere sozinho uma vez por dia. Os números são de torneios; confira antes de decisões grandes.</p>' +
       '<button type="button" class="btn primary full" data-mfetch>' + ICON.refresh + 'Atualizar agora</button></section>' +
+      '<section aria-labelledby="m0b"><h2 id="m0b" class="ph-h">Ler de um print</h2>' +
+      '<p class="small muted">Tire um print da tabela de winrates de uma página (por exemplo, no MTG Decks) e escolha aqui. O app lê os números e mostra tudo ao lado do print para você conferir antes de salvar. Funciona com qualquer tabela de três colunas: nome, taxa em % e partidas.</p>' +
+      '<label class="btn full" for="mimg">' + ICO.cam + 'Escolher print da tabela</label><input type="file" id="mimg" accept="image/*" class="visually-hidden">' +
+      (metaUi.busy ? '<p class="small" role="status" aria-live="polite"><strong>' + esc(metaUi.busy) + '</strong></p>' : '') + '</section>' +
       '<section aria-labelledby="m1"><h2 id="m1" class="ph-h">Plano B: peça os dados para a sua IA</h2>' +
       '<p class="small muted">O pedido já vai com os seus decks. A IA lê o MTG Decks e devolve só números da página.</p>' + list +
       '<button type="button" class="btn primary full" data-mcopy style="margin-top:8px"' + (prem.length ? '' : ' disabled') + '>' + ICON.copy + 'Copiar pedido</button>' +
@@ -2222,6 +2226,89 @@
         metaUi.err = ''; metaUi.parsed = { date: null, source: 'MTG Decks (tabela copiada do site)', decks: dk, rows: tb.rows, skipped: tb.skipped, table: true }; render(); return;
       } metaUi.err = 'Não encontrei nenhuma linha no formato Adversário|taxa|partidas. Confira se colou o bloco inteiro.'; render(); keepFocus('#mtext'); return; }
     metaUi.err = ''; metaUi.parsed = p; render();
+  }
+  /* ---- print de tabela: lê por OCR, mostra ao lado da imagem para conferir e só então salva ---- */
+  function readMetaImage(file) {
+    if (!file) return;
+    if (!metaUi) metaUi = { text: '', err: '', parsed: null };
+    metaUi.err = ''; metaUi.busy = 'Preparando o leitor…'; render();
+    var worker;
+    loadTesseract().then(function (T) {
+      metaUi.busy = 'Lendo o print…'; render();
+      return T.createWorker('eng', 1, {
+        logger: function (m) {
+          if (m.status === 'recognizing text' && metaUi) { var el = main.querySelector('[role=status] strong'); if (el) el.textContent = 'Lendo o print… ' + Math.round(m.progress * 100) + '%'; }
+        }
+      }).then(function (w) { worker = w; return w.recognize(file); }).then(function (r) {
+        if (worker) worker.terminate();
+        var known = FU.META_ARCHS.concat(premodernDecks().map(archOf).filter(Boolean));
+        var p = FU.parseMetaImage(r.data.text, known);
+        metaUi.busy = '';
+        if (!p.rows) { metaUi.err = 'Não encontrei uma tabela nesse print. Tire o print com a tabela inteira, de frente e sem cortar as linhas.'; render(); return; }
+        var url = ''; try { url = URL.createObjectURL(file); } catch (e) {}
+        metaUi.imgUrl = url;
+        metaUi.parsed = { image: true, arch: metaUi.arch || p.arch || '', list: p.list, skipped: p.skipped, rows: p.rows, checkCount: p.checkCount, err: '' };
+        render(); window.scrollTo(0, 0);
+      });
+    }).catch(function () {
+      if (worker) try { worker.terminate(); } catch (e) {}
+      metaUi.busy = '';
+      metaUi.err = navigator.onLine ? 'Não consegui ler o print. Tente de novo, ou use o Plano B (sua IA).' : 'Para ler print, conecte à internet (só na primeira vez).';
+      render();
+    });
+  }
+  function metaImageReviewHtml() {
+    var p = metaUi.parsed;
+    var h = '<div class="form" style="gap:12px">' +
+      (metaUi.imgUrl ? '<img src="' + esc(metaUi.imgUrl) + '" alt="Print que você escolheu, para comparar com os números lidos" style="width:100%;max-height:40vh;object-fit:contain;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface)">' : '') +
+      '<p class="small">Li <strong>' + p.rows + (p.rows === 1 ? ' linha' : ' linhas') + '</strong>' +
+      (p.checkCount ? ', e <strong>' + p.checkCount + '</strong> ' + (p.checkCount === 1 ? 'precisa' : 'precisam') + ' da sua conferência (marcadas abaixo)' : '') +
+      (p.skipped.length ? '. Ignorei ' + p.skipped.length + (p.skipped.length === 1 ? ' linha' : ' linhas') + ' que não entendi' : '') + '.</p>' +
+      '<p class="small">Compare cada linha com o print. Corrija o que estiver errado ou toque em Tirar para apagar a linha.</p>' +
+      '<label for="rvArch" class="small"><strong>De qual deck é esta tabela?</strong></label>' +
+      '<select id="rvArch" class="field"><option value="">Escolher…</option>' + FU.META_ARCHS.map(function (a) { return '<option' + (FU.key(p.arch) === FU.key(a) ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') + '</select>' +
+      '<ul class="rv-rows" style="list-style:none;padding:0;display:grid;gap:10px">';
+    p.list.forEach(function (r, i) {
+      h += '<li class="rv-row" style="display:grid;grid-template-columns:1fr 76px 76px;gap:6px;align-items:center;border:1px solid var(--line-strong);border-radius:8px;padding:8px">' +
+        '<label class="visually-hidden" for="rn' + i + '">Adversário da linha ' + (i + 1) + '</label><input id="rn' + i + '" class="field" data-rv="o" value="' + esc(r.o) + '" autocapitalize="off" spellcheck="false">' +
+        '<label class="visually-hidden" for="rw' + i + '">Taxa de vitória, em porcentagem, da linha ' + (i + 1) + '</label><input id="rw' + i + '" class="field" data-rv="wr" inputmode="decimal" value="' + r.wr + '" aria-describedby="rvu">' +
+        '<label class="visually-hidden" for="rp' + i + '">Partidas da linha ' + (i + 1) + '</label><input id="rp' + i + '" class="field" data-rv="n" inputmode="numeric" value="' + r.n + '">' +
+        '<div style="grid-column:1/-1;display:flex;gap:8px;align-items:center;justify-content:space-between">' + (r.check ? chip('mid', 'Confira esta linha') : '<span></span>') +
+        '<button type="button" class="btn" data-rvdel="' + i + '" style="min-height:44px">Tirar</button></div></li>';
+    });
+    h += '</ul><p id="rvu" class="xs muted">Colunas: adversário, taxa em %, partidas.</p>' +
+      '<p id="rvErr" class="err" role="alert">' + esc(p.err || '') + '</p>' +
+      '<p class="xs muted">Estes números vêm de um site de terceiros e a leitura do print pode errar. Confira com o site antes de decidir algo grande. Se for passar para amigos, peça a eles que também conferam. O MTG Decks pede uso pessoal dos dados.</p>' +
+      '<button type="button" class="btn primary full" data-rvsave>Salvar no app</button>' +
+      '<button type="button" class="btn full" data-mback>Descartar e voltar</button></div>';
+    return h;
+  }
+  function metaCollectEdits() {
+    var p = metaUi.parsed, rows = [], seen = {};
+    var sel = document.getElementById('rvArch'); p.arch = sel ? sel.value : p.arch;
+    var items = main.querySelectorAll('.rv-row');
+    for (var i = 0; i < items.length; i++) {
+      var o = items[i].querySelector('[data-rv="o"]').value.trim(), wr = parseFloat(String(items[i].querySelector('[data-rv="wr"]').value).replace(',', '.')), n = parseInt(items[i].querySelector('[data-rv="n"]').value, 10);
+      if (!o || !isFinite(wr) || wr < 0 || wr > 100 || !(n >= 1)) { p.err = 'Linha ' + (i + 1) + ': confira o nome, a taxa (0 a 100) e as partidas (1 ou mais).'; p.list = rowsFromDom(); return false; }
+      if (seen[FU.key(o)]) { p.err = 'Linha ' + (i + 1) + ': "' + o + '" aparece duas vezes. Tire uma delas.'; p.list = rowsFromDom(); return false; }
+      seen[FU.key(o)] = 1; rows.push({ o: o.slice(0, 60), wr: Math.round(wr * 10) / 10, n: n });
+    }
+    if (!rows.length) { p.err = 'Não sobrou nenhuma linha.'; return false; }
+    if (!p.arch) { p.err = 'Escolha de qual deck é a tabela.'; p.list = rowsFromDom(); return false; }
+    p.err = ''; p.edited = rows; return true;
+  }
+  function rowsFromDom() {
+    var out = [], p = metaUi.parsed, items = main.querySelectorAll('.rv-row');
+    for (var i = 0; i < items.length; i++) out.push({ o: items[i].querySelector('[data-rv="o"]').value, wr: items[i].querySelector('[data-rv="wr"]').value, n: items[i].querySelector('[data-rv="n"]').value, check: p.list[i] ? p.list[i].check : false });
+    return out;
+  }
+  function metaSaveImage() {
+    var p = metaUi.parsed;
+    if (!metaCollectEdits()) { render(); var e = document.getElementById('rvErr'); if (e) e.focus && e.focus(); return; }
+    var dk = {}; dk[p.arch] = p.edited;
+    metaUi.parsed = { date: null, source: 'Print de tabela de site (conferido por você)', decks: dk, rows: p.edited.length, skipped: [] };
+    if (metaUi.imgUrl) { try { URL.revokeObjectURL(metaUi.imgUrl); } catch (e2) {} metaUi.imgUrl = ''; }
+    metaSave();
   }
   function metaSave() {
     var p = metaUi && metaUi.parsed; if (!p) return;
@@ -2285,7 +2372,7 @@
     var m = {}; collectionData().forEach(function (r) { m[FU.key(r.name)] = r; });
     return function (n) { return m[FU.key(canonical(n))] || null; };
   }
-  function chip(kind, text) { return '<span class="chip ' + kind + '">' + (kind === 'no' ? ICO_X : ICO.check) + esc(text) + '</span>'; }
+  function chip(kind, text) { return '<span class="chip ' + kind + '">' + (kind === 'no' ? ICO_X : (kind === 'mid' ? ICO_WARN : ICO.check)) + esc(text) + '</span>'; }
   function noteStatusChip(s) {
     if (s.where === 'side') return chip(s.have >= s.qty ? 'ok' : (s.have ? 'mid' : 'no'), 'No seu sideboard · ' + (s.have >= s.qty ? 'você tem' : (s.have ? 'tem ' + s.have + ' de ' + s.qty : 'ainda não tem')));
     if (s.where === 'main') return chip(s.have ? 'mid' : 'no', 'No seu deck principal · ' + (s.have ? 'você tem' : 'ainda não tem'));
@@ -2421,6 +2508,7 @@
       if (ad) { if (e.target.value) ad.arch = e.target.value; else delete ad.arch; persist(true); render(); keepFocus('#muArch'); }
       return;
     }
+    if (e.target.id === 'mimg') { var mf = e.target.files && e.target.files[0]; if (mf) readMetaImage(mf); return; }
     if (e.target.id === 'ptarget') { readPhotoInputs(); render(); keepFocus('#ptarget'); return; }
     if (e.target.id === 'si') { var f = e.target.files && e.target.files[0]; if (f) readImage(f); return; }
     if (e.target.hasAttribute('data-sortsel')) { state.ui.sort = e.target.value; persist(false); render(); keepFocus('#fSort'); return; }
@@ -2525,10 +2613,16 @@
       return;
     }
     if (t.hasAttribute('data-mfetch')) { metaFetch(false); return; }
+    if (t.hasAttribute('data-rvsave')) { metaSaveImage(); return; }
+    if (t.hasAttribute('data-rvdel')) {
+      var ri = parseInt(t.getAttribute('data-rvdel'), 10), rp = metaUi && metaUi.parsed; if (!rp) return;
+      rp.arch = (document.getElementById('rvArch') || {}).value || rp.arch; rp.list = rowsFromDom(); rp.list.splice(ri, 1); rp.rows = rp.list.length;
+      render(); keepFocus('.rv-row [data-rv="o"]'); return;
+    }
     if (t.hasAttribute('data-mcopy')) { copyText(metaPrompt(), 'Pedido copiado. Cole na sua IA.'); return; }
     if (t.hasAttribute('data-mai')) { var mai = AIS.filter(function (a) { return a[0] === t.getAttribute('data-mai'); })[0]; openAi(mai, metaPrompt(), 'Pedido copiado. Se a IA abrir vazia, é só colar.'); return; }
     if (t.hasAttribute('data-mread')) { metaRead(); return; }
-    if (t.hasAttribute('data-mback')) { metaUi.parsed = null; render(); keepFocus('#mtext'); return; }
+    if (t.hasAttribute('data-mback')) { if (metaUi.imgUrl) { try { URL.revokeObjectURL(metaUi.imgUrl); } catch (e3) {} metaUi.imgUrl = ''; } metaUi.parsed = null; render(); keepFocus('#mtext'); return; }
     if (t.hasAttribute('data-msave')) { metaSave(); return; }
     if (t.hasAttribute('data-mclear')) { if (confirm('Apagar os dados de confronto salvos? Os decks não mudam.')) { delete state.meta; persist(true); render(); toast('Dados apagados.'); } return; }
     if (t.hasAttribute('data-photo')) { location.hash = '#/foto/' + t.getAttribute('data-photo'); return; }
