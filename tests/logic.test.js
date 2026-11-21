@@ -238,7 +238,25 @@ test('considerSuggestions: só cartas em 2+ fontes, fora do deck, da lista e das
   const s = FU.considerSuggestions(d);
   assert.deepEqual(s.map((x) => x.name), ['Powder Keg']);
   assert.equal(s[0].count, 3); assert.equal(s[0].total, 3); assert.equal(s[0].board, 'side');
-  assert.deepEqual(FU.considerSuggestions({ cards: [], sources: [src([['A', 1]])] }), []);
+  // com uma única lista, as cartas dela que faltam no deck já são sugeridas
+  assert.deepEqual(FU.considerSuggestions({ cards: [], sources: [src([['A', 1]])] }).map((x) => x.name), ['A']);
+});
+
+test('considerSync: preenche uma vez, marca auto, não devolve o que foi removido e respeita o limite', () => {
+  const src = (cards) => ({ cards: cards.map(([name, qty, board]) => ({ name, qty, board: board || 'main' })) });
+  const d = { format: 'Premodern', cards: [{ name: 'Counterspell', qty: 4, board: 'main' }], sources: [
+    src([['Counterspell', 4], ['Powder Keg', 2, 'side'], ['Annul', 1]]), src([['Powder Keg', 2, 'side'], ['Annul', 1], ['Wrath of God', 1]])] };
+  assert.equal(FU.considerSync(d, null, 12), 2);
+  assert.deepEqual(d.consider.map((x) => x.name).sort(), ['Annul', 'Powder Keg']);
+  assert.ok(d.consider.every((x) => x.auto === 1 && x.cnt === 2 && x.tot === 2));
+  assert.equal(FU.considerSync(d, null, 12), 0);
+  // pessoa remove: vai para consNo e a carta não volta, mesmo com a lista vazia
+  d.consider = []; d.consNo = ['Annul', 'Powder Keg'];
+  assert.equal(FU.considerSync(d, null, 12), 0);
+  // limite por rodada
+  const big = { format: 'Premodern', cards: [], sources: [src(Array.from({ length: 30 }, (_, i) => ['Card' + i, 1]))] };
+  assert.equal(FU.considerSync(big, null, 12), 12);
+  assert.equal(FU.considerSync({ format: 'Lista', cards: [], sources: big.sources }, null, 12), 0);
 });
 
 test('considerNeed soma só o que falta, descontando o que a pessoa tem solto', () => {

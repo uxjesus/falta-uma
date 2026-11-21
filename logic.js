@@ -785,8 +785,24 @@
     (d.consNo || []).forEach(function (n) { no[key(n)] = 1; });
     return consensus(d.sources || []).filter(function (c) {
       var k = key(canonical ? canonical(c.name) : c.name);
-      return c.count >= 2 && !inDeck[k] && !no[k] && !considerHas(d, c.name, canonical);
+      return c.count >= Math.min(2, c.total || 2) && !inDeck[k] && !no[k] && !considerHas(d, c.name, canonical);
     }).slice(0, limit || 8);
+  }
+  /* Preenche a lista com as sugestões das listas da Pesquisa. Cada carta só é puxada uma vez (d.consSeen):
+     quem tirar da lista não volta, e o que já foi processado não reaparece. Devolve quantas entraram. */
+  function considerSync(d, canonical, perRun) {
+    if (!d || d.format === 'Lista' || !(d.sources || []).length) return 0;
+    var seen = {}, added = 0, run = perRun || 12;
+    (d.consSeen || []).forEach(function (n) { seen[key(n)] = 1; });
+    if ((d.consSeen || []).length >= 60) return 0;
+    considerSuggestions(d, canonical, 200).forEach(function (c) {
+      var k = key(canonical ? canonical(c.name) : c.name);
+      if (added >= run || seen[k] || isBasic(c.name)) return;
+      var e = considerAdd(d, c.name, c.qty, c.board, canonical);
+      e.auto = 1; e.cnt = c.count; e.tot = c.total;
+      d.consSeen = (d.consSeen || []).concat([e.name]); seen[k] = 1; added++;
+    });
+    return added;
   }
   function considerNeed(d, haveOf) {
     return (d.consider || []).reduce(function (t, c) { return t + Math.max(0, c.qty - Math.min(c.qty, haveOf(c.name) || 0)); }, 0);
@@ -795,7 +811,7 @@
   var api = {
     META_MIN: META_MIN, META_SMALL: META_SMALL, META_STALE_DAYS: META_STALE_DAYS, META_ARCHS: META_ARCHS,
     suggestArch: suggestArch, parseMeta: parseMeta, parseMetaTable: parseMetaTable, b64urlDecode: b64urlDecode, b64urlEncode: b64urlEncode,
-    metaEntry: metaEntry, metaSplit: metaSplit, metaAgeDays: metaAgeDays, sideNote: sideNote, sideNotesFor: sideNotesFor, planList: planList, noteCardStatus: noteCardStatus, parseGuide: parseGuide, noAcc: noAcc, considerAdd: considerAdd, considerRemove: considerRemove, considerHas: considerHas, considerSuggestions: considerSuggestions, considerNeed: considerNeed, guideTotals: guideTotals, guidePrompt: guidePrompt,
+    metaEntry: metaEntry, metaSplit: metaSplit, metaAgeDays: metaAgeDays, sideNote: sideNote, sideNotesFor: sideNotesFor, planList: planList, noteCardStatus: noteCardStatus, parseGuide: parseGuide, noAcc: noAcc, considerAdd: considerAdd, considerRemove: considerRemove, considerHas: considerHas, considerSuggestions: considerSuggestions, considerSync: considerSync, considerNeed: considerNeed, guideTotals: guideTotals, guidePrompt: guidePrompt,
     parsePriceBR: parsePriceBR, parseLigaPrices: parseLigaPrices,
     edsSum: edsSum, edsMerge: edsMerge, edsTake: edsTake, edsPop: edsPop,
     splitSource: splitSource, markOwned: markOwned,
