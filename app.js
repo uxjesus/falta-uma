@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.29.1';
+  var APP_VERSION = '0.29.2';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -2418,7 +2418,7 @@
       if (need) h += '<p class="small"><strong>Faltam ' + need + (need === 1 ? ' carta' : ' cartas') + '</strong>' + (val ? ' · ≈ ' + brl0.format(val) : '') + ' desta lista.</p>';
     }
     var pool = FU.considerPool(d, canonical), srcN = (d.sources || []).filter(function (x) { return x.cards && x.cards.length; }).length;
-    if (!list.length) h += '<p class="small">' + (!srcN ? '<strong>Este deck não tem listas na aba Pesquisa.</strong> Junte listas lá e as cartas delas aparecem aqui. Você também pode buscar uma carta acima.'
+    if (!list.length) h += '<p class="small">' + (!srcN ? ((d.sources || []).length ? '<strong>As ' + d.sources.length + (d.sources.length === 1 ? ' fonte da aba Pesquisa é só um link' : ' fontes da aba Pesquisa são só links') + ', sem cartas lidas.</strong> Eu só comparo listas que tenham as cartas (texto colado ou lido de print). Adicione a lista com as cartas na aba Pesquisa.' : '<strong>Este deck não tem listas na aba Pesquisa.</strong> Junte listas lá e as cartas delas aparecem aqui. Você também pode buscar uma carta acima.')
       : (pool.length ? 'Nenhuma carta apareceu em 2 ou mais das suas ' + srcN + (srcN === 1 ? ' lista' : ' listas') + '. As que aparecem em uma só estão logo abaixo.'
         : 'Todas as cartas das suas ' + srcN + (srcN === 1 ? ' lista' : ' listas') + ' já estão no deck ou foram removidas daqui.')) + '</p>';
     if (pool.length) {
