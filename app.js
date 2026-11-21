@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.31.0';
+  var APP_VERSION = '0.31.1';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -962,6 +962,7 @@
         '<button class="btn primary full" data-ownapply style="margin-top:12px">Marcar no deck</button>';
     }
     else if (type === 'swap') { var sw = String(ctx).split('|'), sd = deckById(sw[0]), se = consEntry(sd, +sw[1], sw.slice(2).join('|')); html = se ? considerSwapSheet(sd, se) : '<p>Carta não encontrada.</p>'; }
+    else if (type === 'consall') { var cad2 = deckById(ctx); html = cad2 ? consAllSheet(cad2) : '<p>Deck não encontrado.</p>'; }
     else if (type === 'consact') { var ca0 = String(ctx).split('|'), cad = deckById(ca0[0]), cae = consEntry(cad, +ca0[1], ca0.slice(2).join('|')); html = cae ? considerActionSheet(cad, cae) : '<p>Carta não encontrada.</p>'; }
     else if (type === 'guide') { guideDraft = null; var gd = deckById(ctx); html = gd ? guideInputHtml(gd) : '<p>Deck não encontrado.</p>'; }
     sheetBody.innerHTML = html;
@@ -971,6 +972,19 @@
     var t = e.target.closest('button');
     if (!t || !sheetCtx) return;
     var ctx = sheetCtx.ctx;
+    if (sheetCtx.type === 'consall') {
+      if (t.hasAttribute('data-callno')) { sheet.close(); return; }
+      if (!t.hasAttribute('data-callgo')) return;
+      var cad = deckById(ctx), cl = cad ? consAllList(cad) : [];
+      if (cl.length < 2) { toast('A lista mudou. Abra de novo.'); sheet.close(); return; }
+      var cn = 0;
+      cl.slice().reverse().forEach(function (x) { if (consToDeck(cad, x.i, x.e.name)) cn++; });
+      persist(true); sheet.close();
+      var ya = window.scrollY; render(); window.scrollTo(0, ya);
+      var fca = document.getElementById('csH'); if (fca) fca.focus({ preventScroll: true });
+      toast(cn + (cn === 1 ? ' carta entrou' : ' cartas entraram') + ' no deck.');
+      return;
+    }
     if (sheetCtx.type === 'consact') {
       var cp = String(ctx).split('|'), cdk = deckById(cp[0]), cnm = cp.slice(2).join('|');
       if (!cdk || !consEntry(cdk, +cp[1], cnm)) { toast('A lista mudou. Abra a carta de novo.'); sheet.close(); return; }
@@ -2192,7 +2206,7 @@
     if (m) {
       metaUi = { text: '', err: '', parsed: null };
       try { metaUi.text = FU.b64urlDecode(m[1]); metaUi.parsed = FU.parseMeta(metaUi.text); if (!metaUi.parsed.rows) { metaUi.err = 'O link veio sem dados que eu consiga ler.'; metaUi.parsed = null; } }
-      catch (e) { metaUi.err = 'Não consegui abrir os dados desse link. Cole o texto que a IA mandou no passo 2.'; }
+      catch (e) { metaUi.err = 'Não consegui abrir os dados desse link. Cole o texto que a IA mandou no passo 3.'; }
       try { history.replaceState({ fu: navDepth, prev: curPrev }, '', '#/meta'); } catch (e2) {}
     }
     if (!metaUi) metaUi = { text: '', err: '', parsed: null };
@@ -2205,12 +2219,15 @@
       '<section aria-labelledby="m0"><h2 id="m0" class="ph-h">Atualizar agora</h2>' +
       '<p class="small muted">O servidor do Playset lê os torneios Premodern recentes do <a href="https://topdeck.gg" target="_blank" rel="noopener">TopDeck.gg</a> toda semana. O app confere sozinho uma vez por dia. Os números são de torneios; confira antes de decisões grandes.</p>' +
       '<button type="button" class="btn primary full" data-mfetch>' + ICON.refresh + 'Atualizar agora</button></section>' +
-      '<section aria-labelledby="m1"><h2 id="m1" class="ph-h">Plano B: peça os dados para a sua IA</h2>' +
+      '<p class="small"><strong>Se a atualização falhar, use a sua IA em 3 passos.</strong></p>' +
+      '<section aria-labelledby="m1"><h2 id="m1" class="ph-h"><span aria-hidden="true">1</span>Copie o pedido</h2>' +
       '<p class="small muted">O pedido já vai com os seus decks. A IA lê o MTG Decks e devolve só números da página.</p>' + list +
       '<button type="button" class="btn primary full" data-mcopy style="margin-top:8px"' + (prem.length ? '' : ' disabled') + '>' + ICON.copy + 'Copiar pedido</button>' +
       '<div class="aibtns">' + AIS.map(function (a) { return '<button type="button" class="btn" data-mai="' + a[0] + '"' + (prem.length ? '' : ' disabled') + '>Copiar e abrir ' + a[1] + '</button>'; }).join('') + '</div>' +
       (noArch.length ? '<p class="xs err" style="margin-top:8px">Falta escolher o arquétipo de ' + noArch.length + (noArch.length === 1 ? ' deck' : ' decks') + '. Eles ficam de fora do pedido.</p>' : '') + '</section>' +
-      '<section aria-labelledby="m2"><h2 id="m2" class="ph-h"><span aria-hidden="true">1</span>Cole a resposta ou a tabela aqui</h2>' +
+      '<section aria-labelledby="m1b"><h2 id="m1b" class="ph-h"><span aria-hidden="true">2</span>Cole na sua IA</h2>' +
+      '<p class="small muted">Abra a IA que você usa, cole o pedido e espere a resposta. Se a IA abrir sem o pedido preenchido, é só colar.</p></section>' +
+      '<section aria-labelledby="m2"><h2 id="m2" class="ph-h"><span aria-hidden="true">3</span>Cole a resposta ou a tabela aqui</h2>' +
       '<p class="small muted">Cole o bloco que a IA mandou. Se a IA não conseguiu abrir alguma página, abra você a página do deck em mtgdecks.net/Premodern no Chrome, copie a tabela de winrates e cole abaixo: o app lê sozinho.</p>' +
       '<label for="march" class="small" style="display:block;margin-top:8px"><strong>Se for a tabela de uma página do site, de qual deck ela é?</strong></label>' +
       '<select id="march" class="field" style="margin-top:4px"><option value="">Escolher…</option>' + FU.META_ARCHS.map(function (a) { return '<option' + (metaUi.arch === a ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') + '</select>' +
@@ -2409,10 +2426,11 @@
       '<button type="button" class="btn primary" data-acgo>' + ICON.plus + 'Adicionar</button></div>' +
       '<p class="xs muted" id="acHelp">Entra 1 cópia aqui. Para pôr direto no deck, toque no ⋯ da carta e escolha “Pôr no deck”.</p>' +
       '<p class="visually-hidden" id="acLive" aria-live="polite"></p><ul class="aclist" id="acList"></ul>';
+    var liveCons = consLive(d);
     if (list.length) {
       h += '<ul class="rows cons-rows">' + list.map(function (c, i) {
         var have = Math.min(c.qty, spareQty(c.name)), info = cardInfo(c.name), pr = moneyShort(info, 1), ref = id + '|' + i + '|' + esc(c.name), nm = esc(c.name);
-        var why = c.auto && c.cnt ? 'aparece em ' + c.cnt + ' de ' + c.tot : '';
+        var lv = c.auto ? liveCons[FU.key(canonical(c.name))] : null, why = lv ? 'aparece em ' + lv.cnt + ' de ' + lv.tot : (c.auto && c.cnt ? 'aparece em ' + c.cnt + ' de ' + c.tot : '');
         var cls = have >= c.qty ? 'done' : (have > 0 ? 'part' : 'none');
         return '<li class="r"><span class="q' + (have >= c.qty ? '' : ' miss') + '">' + c.qty + '</span>' +
           '<button class="nm" data-card="' + nm + '">' + esc(canonical(c.name)) + '<span class="d">' + (c.board === 'side' ? 'sideboard' : 'principal') + (why ? ' · ' + why : '') + (pr ? ' · ' + pr + ' cada' : '') + '</span></button>' +
@@ -2420,6 +2438,8 @@
           '<span class="ra"><button class="own ' + cls + '" data-conshave="' + ref + '" aria-pressed="' + (have >= c.qty) + '" aria-label="Tenho ' + have + ' de ' + c.qty + ' ' + nm + '. Tocar para marcar ' + (have >= c.qty ? 'nenhuma' : 'todas') + '"><i>' + (have >= c.qty ? '✓' : have + '/' + c.qty) + '</i></button>' +
           '<button class="ib" data-consmenu="' + ref + '" aria-label="Mais ações para ' + nm + ': pôr no deck, trocar ou remover">' + svg('<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>') + '</button></span></li>';
       }).join('') + '</ul>';
+      var ca = consAllList(d);
+      if (ca.length >= 2) h += '<button type="button" class="btn full" data-consall="' + id + '">' + ICON.plus + 'Pôr no deck as ' + ca.length + ' que estão em todas as fontes</button>';
       if (need) h += '<p class="small"><strong>Faltam ' + need + (need === 1 ? ' carta' : ' cartas') + '</strong>' + (val ? ' · ≈ ' + brl0.format(val) : '') + ' desta lista.</p>';
     }
     var pool = FU.considerPool(d, canonical), srcN = (d.sources || []).filter(function (x) { return x.cards && x.cards.length; }).length;
@@ -2442,6 +2462,27 @@
   function consEntry(d, idx, name) {
     var e = d && (d.consider || [])[idx];
     return e && FU.key(e.name) === FU.key(name) ? e : null;
+  }
+  /* Cartas de "Em consideração" que aparecem em todas as fontes lidas (2 ou mais fontes): candidatas ao lote. */
+  /* Contagem ao vivo (em quantas das fontes lidas a carta aparece): os números guardados na carta ficam velhos quando entra outra fonte depois. */
+  function consLive(d) {
+    var m = {};
+    FU.consensus(d.sources || []).forEach(function (c) { m[FU.key(canonical(c.name))] = { cnt: c.count, tot: c.total }; });
+    return m;
+  }
+  function consAllList(d) {
+    var live = consLive(d);
+    return (d.consider || []).map(function (e, i) { return { i: i, e: e, l: live[FU.key(canonical(e.name))] }; }).filter(function (x) { return x.e.auto && x.l && x.l.tot > 1 && x.l.cnt === x.l.tot; });
+  }
+  function consAllSheet(d) {
+    var l = consAllList(d);
+    if (l.length < 2) return '<p>A lista mudou. Feche e abra de novo.</p>';
+    return '<h2 id="sheetTitle">Pôr ' + l.length + ' cartas no deck?</h2>' +
+      '<p class="small">São as cartas que aparecem em todas as suas fontes lidas. Entram na quantidade sugerida e saem da lista Em consideração.</p>' +
+      '<ul class="menu">' + l.map(function (x) { return '<li><span style="display:block;padding:10px 0">' + x.e.qty + '× ' + esc(canonical(x.e.name)) + ' <span class="muted small">· ' + (x.e.board === 'side' ? 'sideboard' : 'principal') + '</span></span></li>'; }).join('') + '</ul>' +
+      '<p class="xs muted">Para desfazer uma carta, toque nela no deck e escolha “Tirar do deck”.</p>' +
+      '<button type="button" class="btn primary full" data-callgo style="margin-top:8px">Pôr ' + l.length + ' cartas no deck</button>' +
+      '<button type="button" class="btn full" data-callno style="margin-top:8px">Cancelar</button>';
   }
   function consToDeck(dd, idx, name) {
     var de = consEntry(dd, idx, name); if (!de) return null;
@@ -2722,6 +2763,7 @@
       copyText(FU.toLigaMagic(missingAgg(bscope)), 'Copiado. Cole no "Comprar por lista" da Liga Magic.');
       return;
     }
+    if (t.hasAttribute('data-consall')) { openSheet('consall', t.getAttribute('data-consall'), t); return; }
     if (t.hasAttribute('data-consmenu')) { openSheet('consact', t.getAttribute('data-consmenu'), t); return; }
     if (t.hasAttribute('data-conspool')) {
       var pv = t.getAttribute('data-conspool').split('|'), pd = deckById(pv[0]), pn = pv.slice(1).join('|');
@@ -2792,27 +2834,6 @@
         dd.sources = dd.sources.filter(function (x) { return x !== src; });
         persist(true); render(); toast('Fonte removida.');
       }
-      return;
-    }
-    if (t.hasAttribute('data-addc') || t.hasAttribute('data-addall')) {
-      var dk = deckById(route().id);
-      if (!dk) return;
-      var added = [];
-      if (t.hasAttribute('data-addall')) {
-        var inD = {};
-        dk.cards.forEach(function (c) { inD[FU.key(canonical(c.name))] = 1; });
-        FU.consensus(dk.sources).filter(function (c) { return c.count === c.total && !inD[FU.key(canonical(c.name))]; }).forEach(function (c) { addToDeck(dk, c.name, c.qty, c.board); added.push(c.name); });
-      } else {
-        addToDeck(dk, t.getAttribute('data-addc'), +t.getAttribute('data-q'), t.getAttribute('data-b'));
-        added.push(t.getAttribute('data-addc'));
-      }
-      persist(true);
-      var nameSel = t.hasAttribute('data-addc') ? t.getAttribute('data-addc') : null;
-      var y = window.scrollY; render(); window.scrollTo(0, y);
-      if (nameSel) { var nb = main.querySelector('[data-card="' + (window.CSS && CSS.escape ? CSS.escape(nameSel) : nameSel) + '"]'); if (nb) nb.focus({ preventScroll: true }); }
-      toast(added.length === 1 ? 'Adicionada ao deck.' : added.length + ' cartas adicionadas ao deck.');
-      var need = added.filter(function (n) { var i = cardInfo(n); return !i || !i.typeLine; });
-      if (need.length) refreshPrices({ only: need, silent: true });
       return;
     }
     if (t.hasAttribute('data-onlymiss')) { state.ui.onlyMiss = !state.ui.onlyMiss; persist(false); render(); keepFocus('[data-onlymiss]'); return; }
