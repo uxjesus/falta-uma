@@ -2261,8 +2261,8 @@
         h += '<p class="small"><strong>Entra</strong></p><ul class="mu-cards">' + note.plan.in.map(function (x) {
           return '<li><span class="nm">' + qn(x) + '</span> ' + noteStatusChip(FU.noteCardStatus(x.name, d, canonical, lookup)) + '</li>'; }).join('') + '</ul>';
         if (note.plan.out.length) h += '<p class="small"><strong>Sai</strong></p><ul class="mu-cards">' + note.plan.out.map(function (x) {
-          var st = FU.noteCardStatus(x.name, d, canonical, lookup);
-          return '<li><span class="nm">' + qn(x) + '</span> ' + (st.where === 'main' ? chip('ok', 'No seu deck principal') : chip('mid', 'Não achei no seu principal: ignore essa troca')) + '</li>'; }).join('') + '</ul>';
+          var kk = FU.key(canonical(x.name)), inMain = d.cards.filter(function (c) { return c.board !== 'side' && c.board !== 'maybe' && FU.key(canonical(c.name)) === kk; }).reduce(function (t, c) { return t + c.qty; }, 0);
+          return '<li><span class="nm">' + qn(x) + '</span> ' + (!inMain ? chip('mid', 'Não achei no seu principal: ignore essa troca') : (x.q && inMain < x.q ? chip('mid', 'Você tem só ' + inMain + ' no principal') : chip('ok', 'No seu deck principal'))) + '</li>'; }).join('') + '</ul>';
         h += '<p class="xs">' + (note.partial ? 'O guia só nomeia parte das trocas, sem quantidades.' : 'Entram ' + sum(note.plan.in) + ' · saem ' + sum(note.plan.out) + '. As trocas são as do autor para a lista dele: confira com a sua.') + '</p>';
       } else {
         h += '<p class="small"><strong>Cartas que o guia sugere trazer</strong></p><ul class="mu-cards">' + note.in.map(function (n) {
@@ -2280,14 +2280,14 @@
     return h;
   }
   /* Guias conferidos que não dependem de winrates: abrem direto, mesmo sem dados do servidor. */
-  function guideRows(d, arch, skip, title) {
+  function guideRows(d, arch, skip, title, few) {
     var opps = FU.sideNotesFor(arch).filter(function (o) { return !skip[o]; });
     if (!opps.length) return '';
     var h = '<h3 class="small" style="margin-top:8px"><strong>' + esc(title) + '</strong></h3>';
     opps.forEach(function (o) {
       var id = d.id + '|' + o, open = !!muOpen[id];
       h += '<button type="button" class="mu-row" data-mu="' + esc(id) + '" aria-expanded="' + open + '"><span class="o">' + esc(o) + '</span><span class="w">Guia</span>' +
-        '<span class="s">sem winrate · toque para ver o plano de sideboard</span></button>' + (open ? matchupPanel(d, arch, { o: o, wr: null, n: null }, null) : '');
+        '<span class="s">' + (few && few[o] ? 'só ' + few[o] + ' partidas nos dados' : 'sem winrate') + ' · toque para ver ' + (FU.sideNote(arch, o).plan ? 'o plano de sideboard' : 'as cartas do guia') + '</span></button>' + (open ? matchupPanel(d, arch, { o: o, wr: null, n: null }, null) : '');
     });
     return h;
   }
@@ -2322,8 +2322,8 @@
     }
     if (sp.few.length) h += '<details class="small"><summary style="min-height:44px;display:flex;align-items:center;cursor:pointer">' + sp.few.length + (sp.few.length === 1 ? ' confronto' : ' confrontos') + ' com poucos dados (menos de ' + FU.META_MIN + ' partidas)</summary><ul style="padding-left:20px">' +
       sp.few.map(function (r) { return '<li>' + esc(r.o) + ': ' + r.wr + '% em ' + r.n + ' partidas</li>'; }).join('') + '</ul></details>';
-    var shown = {}; sp.ok.forEach(function (r) { shown[r.o] = true; });
-    return h + guideRows(d, arch, shown, 'Outros guias conferidos (sem winrate)') + '<a class="btn full" href="#/meta">Importar winrates</a></section>';
+    var shown = {}, fewN = {}; sp.ok.forEach(function (r) { shown[r.o] = true; }); sp.few.forEach(function (r) { fewN[r.o] = r.n; });
+    return h + guideRows(d, arch, shown, 'Outros guias conferidos', fewN) + '<a class="btn full" href="#/meta">Importar winrates</a></section>';
   }
 
   /* ---------- roteamento ---------- */
