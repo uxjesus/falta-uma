@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.30.1';
+  var APP_VERSION = '0.31.0';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -848,7 +848,7 @@
         (f ? '<img src="' + esc(artOf(f)) + '" alt="" loading="lazy" decoding="async">' : '') +
         '<span class="badge">' + esc(d.format || 'Sem formato') + '</span>' + pipsHtml(deckColors(d)) + '</div>' +
         '<div class="body"><strong>' + esc(d.name) + '</strong>' + sealsHtml(d) +
-        '<div class="ln"><span>' + (d.cards.length ? p.pct + '% pronto · ' + (miss ? 'faltam ' + miss : 'completo') : (d.format === 'Lista' ? 'Lista vazia' : 'Sem cartas · ' + ((d.sources || []).length || 0) + ' fontes na pesquisa')) + '</span><span>' + (mv ? '≈ ' + brl0.format(mv) : '') + '</span></div>' +
+        '<div class="ln"><span>' + (d.cards.length ? p.pct + '% pronto · ' + (miss ? 'faltam ' + miss : 'completo') : (d.format === 'Lista' ? 'Lista vazia' : 'Sem cartas · ' + ((d.sources || []).length || 0) + ((d.sources || []).length === 1 ? ' fonte' : ' fontes'))) + '</span><span>' + (mv ? '≈ ' + brl0.format(mv) : '') + '</span></div>' +
         '<div class="bar" aria-hidden="true"><span style="width:' + p.pct + '%"></span></div></div></a></li>';
     });
     html += '</ul>';
@@ -1189,13 +1189,13 @@
     var p = FU.deckProgress(d);
     var miss = p.need - p.have;
     var f = featured(d);
-    var tab = state.ui.view[d.id + ':tab'] === 'research' || state.ui.view[d.id] === 'research' ? 'research' : 'deck';
+    var hasPlay = d.format !== 'Lista';
+    var tab = hasPlay && state.ui.view[d.id + ':tab'] === 'play' ? 'play' : 'deck';
     var view = state.ui.view[d.id] === 'list' ? 'list' : 'grid';
     var onlyMiss = !!state.ui.onlyMiss;
     var basics = d.cards.filter(function (c) { return FU.isBasic(c.name); });
     var total = d.cards.filter(function (c) { return c.board !== 'side'; }).reduce(function (s, c) { return s + c.qty; }, 0);
     var missV = deckValue(d, true);
-    var nSrc = (d.sources || []).length;
 
     var html = '<section class="banner" style="' + (f ? '' : phStyle({ colors: deckColors(d) })) + '">' +
       (f ? '<img class="art" src="' + esc(artOf(f)) + '" alt="" decoding="async">' : '') + '<span class="shade"></span>' +
@@ -1205,19 +1205,18 @@
       '<p style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="badge">' + esc(d.format || 'Sem formato') + '</span>' + pipsHtml(deckColors(d)) + (FU.deckComplete(d) ? '<span class="seal ok on-art">' + ICO.check + 'Completo</span>' : '') + '</p>' +
       (d.cards.length ? '<p class="metaline"><span><strong>' + p.pct + '%</strong> pronto</span><span>' + total + ' cartas</span>' +
         (miss ? '<span>faltam <strong>' + miss + '</strong>' + (missV ? ' · ≈ ' + brl0.format(missV) : '') + '</span>' : '<span>completo</span>') + '</p>' +
-        '<div class="meter" aria-hidden="true"><span style="width:' + p.pct + '%"></span></div>' : '<p class="metaline"><span>' + (d.format === 'Lista' ? 'Sem cartas ainda. Busque abaixo.' : 'Sem cartas ainda. Monte pela Pesquisa.') + '</span></p>') +
+        '<div class="meter" aria-hidden="true"><span style="width:' + p.pct + '%"></span></div>' : '<p class="metaline"><span>' + (d.format === 'Lista' ? 'Sem cartas ainda. Busque abaixo.' : 'Sem cartas ainda. Junte fontes em “Em consideração”.') + '</span></p>') +
       '<p class="updated">Atualizado ' + esc(ago(state.changedAt || d.createdAt) || '') + '</p></div></section>' +
-      '<div class="tabsbar" role="tablist" aria-label="Seções do deck">' +
-      '<button role="tab" data-dtab="deck" aria-selected="' + (tab === 'deck') + '">Deck</button>' +
-      '<button role="tab" data-dtab="research" aria-selected="' + (tab === 'research') + '">Pesquisa' + (nSrc ? ' (' + nSrc + ')' : '') + '</button></div>';
+      (hasPlay ? '<div class="tabsbar" role="tablist" aria-label="Seções do deck">' +
+      '<button role="tab" data-dtab="deck" aria-selected="' + (tab === 'deck') + '">Lista</button>' +
+      '<button role="tab" data-dtab="play" aria-selected="' + (tab === 'play') + '">Como jogar</button></div>' : '');
 
-    if (tab === 'research') return html + viewResearch(d);
+    if (tab === 'play') return html + primerHtml(d) + matchupCard(d);
     if (!d.cards.length) {
       if (d.format === 'Lista') return html + '<div class="card pad stack" style="margin:16px"><p><strong>Lista vazia.</strong></p><p class="muted small">Busque uma carta abaixo, ou abra qualquer carta do app e toque em "Adicionar a um deck ou lista".</p></div>' + addCardHtml(d);
-      return html + '<div class="card pad stack" style="margin:16px"><p><strong>Seu deck ainda não tem cartas.</strong></p><p class="muted small">Use a Pesquisa para juntar listas de referência e escolher o que entra, busque cartas abaixo, ou edite o deck e cole uma lista.</p>' +
-        '<button class="btn primary full" data-dtab="research">Abrir Pesquisa</button></div>' + addCardHtml(d);
+      if (FU.considerSync(d, canonical, 12)) persist(true);
+      return html + '<div class="card pad stack" style="margin:16px"><p><strong>Seu deck ainda não tem cartas.</strong></p><p class="muted small">Junte listas de referência em “Em consideração” e escolha o que entra, busque cartas abaixo, ou edite o deck e cole uma lista.</p></div>' + considerHtml(d);
     }
-    html += primerHtml(d);
     html += toolsBar([
       toolBtn('data-sheet="export" data-ctx="' + esc(d.id) + '"', ICO.exp, 'Exportar'),
       toolBtn('data-sheet="owned" data-ctx="' + esc(d.id) + '"', svg('<path d="M9 11l3 3 8-8"/><path d="M20 12v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h11"/>'), 'Marcar o que eu tenho colando uma lista'),
@@ -1248,7 +1247,6 @@
     }
     if (FU.considerSync(d, canonical, 12)) persist(true);
     html += considerHtml(d);
-    html += matchupCard(d);
     if (d.format === 'Lista') html += addCardHtml(d);
     html += '<p class="foot">' + (view === 'list' ? 'Toque no marcador à direita para dizer que tem todas (ou nenhuma). ' : '') + 'Toque numa carta para mudar a quantidade, mover para o sideboard, tirar do deck ou ajustar quantas você tem.</p>';
     return html;
@@ -1419,7 +1417,7 @@
       '<form id="deckForm" class="form" novalidate data-id="' + (d ? esc(d.id) : '') + '">' +
       '<div><label for="dn">Nome</label><input type="text" id="dn" autocomplete="off" required placeholder="' + (isList ? 'Ex.: Avulsas, Upgrades do Commander' : 'Ex.: UG Madness') + '" value="' + (d ? esc(d.name) : '') + '"></div>' +
       '<div><label for="df">Tipo</label><select id="df" class="field">' + formats.map(function (f) { return '<option value="' + f[0] + '"' + (cur === f[0] ? ' selected' : '') + '>' + f[1] + '</option>'; }).join('') + '</select></div>' +
-      '<div><label for="dl">Lista <span class="muted">(opcional: dá para montar pela Pesquisa)</span></label><p class="small muted" id="dlh" style="margin:0 0 8px">Cole do Moxfield, Archidekt, MTG Goldfish, Arena ou WhatsApp. Uma carta por linha, ex.: 4 Counterspell. Sideboard depois de uma linha "Sideboard".' + (d ? ' O que você já marcou como "tenho" continua marcado.' : '') + '</p>' +
+      '<div><label for="dl">Lista <span class="muted">(opcional: dá para juntar fontes depois)</span></label><p class="small muted" id="dlh" style="margin:0 0 8px">Cole do Moxfield, Archidekt, MTG Goldfish, Arena ou WhatsApp. Uma carta por linha, ex.: 4 Counterspell. Sideboard depois de uma linha "Sideboard".' + (d ? ' O que você já marcou como "tenho" continua marcado.' : '') + '</p>' +
       '<textarea id="dl" aria-describedby="dlh" spellcheck="false" autocapitalize="off">' + (d ? esc(FU.toText(d.cards)) : '') + '</textarea></div>' +
       '<div class="chk"><input type="checkbox" id="dm"' + (state.ui.markAll === false ? '' : ' checked') + '><label for="dm">Marcar todas as cartas da lista como "tenho"</label></div>' +
       '<p class="small muted" style="margin:-4px 0 0">Só marca, nunca desmarca. Desligue se colar a lista de outra pessoa.</p>' +
@@ -1432,36 +1430,36 @@
 
   function ligaSectionHtml() {
     var cv = ligaCoverage();
-    return '<section class="card pad stack" aria-labelledby="lg"><h2 id="lg" style="font-size:1.0625rem">Preços da Liga Magic (Brasil)</h2>' +
+    return '<section class="card pad stack" aria-labelledby="lg"><h3 id="lg" style="font-size:1.0625rem">Preços da Liga Magic (Brasil)</h3>' +
       '<p class="muted small">Tire print da página da carta na Liga e a sua IA lê os valores: menor, médio e maior. Ficam salvos no aparelho, sem internet, com a data.</p>' +
       '<p class="small"><strong>' + cv.have + ' de ' + cv.total + '</strong> cartas com preço da Liga' + (cv.last ? ' · último em ' + esc(fmtDate(cv.last)) : '') + '</p>' +
-      '<a class="btn primary full" href="#/precos">Importar preços por print</a>' +
-      '<a class="btn full" href="#/troca">' + ICO.swap + 'Modo troca</a></section>';
+      '<a class="btn primary full" href="#/precos">Importar preços por print</a></section>';
   }
   function viewMais() {
     barAction.innerHTML = ''; fab.innerHTML = '';
     var nag = needsBackup();
-    return '<header class="head"><h1>Mais</h1></header><div class="form">' +
-      '<section class="card pad stack" aria-labelledby="pr"><h2 id="pr" style="font-size:1.0625rem">Atualizar preços e cartas</h2>' +
-      '<p class="muted small">Baixa os preços do dia, o câmbio e os dados e regras das cartas. Faça uma vez antes de ir à loja: depois tudo funciona sem internet.</p>' +
+    var gPrices = ('<h2 class="sec-h" style="padding:12px 0 0">Preços e dados</h2>' +
+      '<section class="card pad stack" aria-labelledby="pr"><h3 id="pr" style="font-size:1.0625rem">Atualizar preços e cartas</h3>' +
+      '<p class="muted small">Baixa preços, câmbio e dados das cartas. Faça antes de ir à loja: depois funciona sem internet.</p>' +
       '<p class="small">Última atualização: <strong>' + (fmtDate(db.updatedAt) || 'nenhuma') + '</strong>' + (db.rate ? ' · US$ 1 = ' + brl.format(db.rate.brl) : '') + '</p>' +
       '<button class="btn primary full" data-act="refresh">' + ICON.refresh + 'Atualizar agora</button>' +
-      '<p class="xs muted">O preço automático vem do Scryfall em dólar (mercado americano). É só uma noção. O preço que vale é o da Liga Magic, na seção abaixo.</p></section>' +
-      ligaSectionHtml() +
-      metaSectionHtml() +
-      '<section class="card pad stack" aria-labelledby="fr"><h2 id="fr" style="font-size:1.0625rem">Lista de um amigo</h2>' +
+      '<p class="xs muted">Preço automático: Scryfall, em dólar. É só uma noção; vale o da Liga Magic, abaixo.</p></section>' +
+      ligaSectionHtml());
+    var gTools = ('<h2 class="sec-h" style="padding:12px 0 0">Ferramentas</h2>' +
+      '<section class="card pad stack" aria-labelledby="fr"><h3 id="fr" style="font-size:1.0625rem">Lista de um amigo</h3>' +
       '<p class="muted small">Cole a lista que ele mandou. Eu mostro quais dessas cartas você marcou que tem, nos decks, nas listas ou guardadas.</p>' +
       '<label for="fl" class="visually-hidden">Lista do amigo</label><textarea id="fl" spellcheck="false" autocapitalize="off" style="min-height:140px" placeholder="4 Counterspell&#10;2 Wild Mongrel"></textarea>' +
-      '<button class="btn full" data-act="friend">Ver o que eu tenho</button></section><div id="friendOut" aria-live="polite"></div>' +
+      '<button class="btn full" data-act="friend">Ver o que eu tenho</button></section><div id="friendOut" aria-live="polite"></div>');
+    var gBackup = ('<h2 class="sec-h" style="padding:12px 0 0">Backup</h2>' +
       syncSectionHtml() +
-      '<section class="card pad stack" aria-labelledby="bk"><h2 id="bk" style="font-size:1.0625rem">Backup dos seus decks</h2>' +
+      '<section class="card pad stack" aria-labelledby="bk"><h3 id="bk" style="font-size:1.0625rem">Backup dos seus decks</h3>' +
       (nag ? '<p class="small" style="color:var(--miss);font-weight:700">' + (state.lastBackup ? 'Seu último backup está desatualizado.' : 'Você ainda não fez backup.') + '</p>' : '') +
       '<p class="muted small">Guarda seus decks e o que você marcou como \"tenho\" fora do celular. Toque em \"Enviar backup\" e escolha o WhatsApp. Mande para você mesmo (a conversa com o seu próprio número). Vai um arquivo com as instruções de como voltar. Não apague. Para voltar: segure o arquivo no WhatsApp, toque em Compartilhar e escolha Playset.</p>' +
       '<p class="small">Último backup: <strong>' + (fmtDate(state.lastBackup) || 'nenhum') + '</strong></p>' +
       '<p class="small" id="bkStatus" role="status" aria-live="polite">' + (backupMsg ? '<strong>' + esc(backupMsg) + '</strong>' : '') + '</p>' +
       '<button class="btn primary full" data-act="backup">Enviar backup (WhatsApp, Telegram…)</button>' +
       '<button class="btn full" data-act="backupcopy">Copiar o backup como texto</button>' +
-      '<h3 style="font-size:1rem;margin-top:12px">Voltar um backup</h3>' +
+      '<h4 style="font-size:1rem;margin-top:12px">Voltar um backup</h4>' +
       '<p class="muted small">Se preferir colar: abra a mensagem do backup, copie o texto inteiro e cole aqui. Antes de importar, guardo uma cópia do que está no app agora.</p>' +
       '<label for="bkText" class="small">Cole aqui a mensagem do backup</label>' +
       '<textarea id="bkText" spellcheck="false" autocapitalize="off" style="min-height:96px"></textarea>' +
@@ -1471,14 +1469,15 @@
       (function () {
         var sn = readSnap();
         if (!sn) return '';
-        return '<h3 style="font-size:1rem;margin-top:12px">Cópia automática</h3>' +
+        return '<h4 style="font-size:1rem;margin-top:12px">Cópia automática</h4>' +
           '<p class="muted small">' + esc(sn.reason) + ' · guardada em ' + esc(fmtDate(sn.at)) + '. Se alguma atualização bagunçar seus decks, volte para ela.</p>' +
           '<button class="btn full" data-act="snaprestore">Voltar os decks para essa cópia</button>';
-      })() + '</section>' +
+      })() + '</section>');
+    return '<header class="head"><h1>Mais</h1></header><div class="form">' + (nag ? gBackup + gPrices + gTools : gPrices + gTools + gBackup) +
       '<p class="xs muted">Dados, imagens e símbolos das cartas: Scryfall. Playset não é afiliado à Wizards of the Coast.</p></div>';
   }
 
-  /* ---------- caderno de pesquisa ---------- */
+  /* ---------- fontes e listas de referência ---------- */
   var CATALOG_KEY = 'fu.catalog.at';
   var catalogIdx = null;
   function knownIndex() {
@@ -1522,65 +1521,27 @@
     link: { label: 'Link', icon: svg('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>') }
   };
 
-  function viewResearch(d) {
-    var sources = d.sources || [];
-    var cons = FU.consensus(sources);
-    var inDeck = {};
-    d.cards.forEach(function (c) { inDeck[FU.key(canonical(c.name))] = (inDeck[FU.key(canonical(c.name))] || 0) + c.qty; });
-    var withCards = sources.filter(function (s) { return s.cards && s.cards.length; }).length;
+  /* Fontes do deck: moram dentro de "Em consideração". Uma linha por fonte; a não lida mostra o botão de colar a lista na própria linha. */
+  function sourcesHtml(d) {
+    var sources = d.sources || [], id = esc(d.id);
     var unread = sources.filter(function (x) { return !(x.cards && x.cards.length); });
-    var html = '<section class="sec"><h2 class="sec-h">Fontes <span class="c">(' + sources.length + (unread.length ? ' · ' + withCards + ' lidas' : '') + ')</span></h2>';
-    if (unread.length) {
-      html += '<div class="card pad stack warnbox" style="margin:4px 16px 8px" role="group" aria-labelledby="unH"><h3 id="unH" style="font-size:1rem">' + unread.length + ' de ' + sources.length + (unread.length === 1 ? ' fonte não foi lida' : ' fontes não foram lidas') + '</h3>' +
-        '<p class="small">O app não consegue ler as cartas de um link (Moxfield, por exemplo). Fonte que não foi lida <strong>não entra</strong> no consenso nem no “Em consideração”. Abra a lista no site, copie o texto das cartas e cole aqui.</p>' +
-        '<ul class="cons-list">' + unread.map(function (x) {
-          return '<li class="cr"><div class="cn"><span class="nm" style="cursor:default">' + esc(x.label || 'Link') + '</span></div><div class="ca"><a class="btn primary" href="#/fonte/' + esc(d.id) + '?fill=' + esc(x.id) + '" aria-label="Colar a lista de ' + esc(x.label || 'link') + '">Colar a lista</a></div></li>';
-        }).join('') + '</ul></div>';
-    }
+    var read = sources.length - unread.length;
+    var h = '<details class="srcbox"' + (unread.length || !sources.length ? ' open' : '') + '><summary style="min-height:44px;display:flex;align-items:center;cursor:pointer"><strong>Fontes (' + sources.length + (unread.length ? ' · ' + read + ' lidas' : '') + ')</strong></summary>';
     if (!sources.length) {
-      html += '<div class="card pad stack" style="margin:4px 16px"><p><strong>Junte referências para montar a sua lista.</strong></p>' +
-        '<p class="muted small">Adicione listas de torneio, decks de outros jogadores, prints e links. Eu mostro quais cartas aparecem em mais fontes, e você escolhe o que entra no seu deck.</p>' +
-        '<a class="btn primary full" href="#/fonte/' + esc(d.id) + '">' + ICON.plus + 'Adicionar fonte</a></div>';
-    } else {
-      html += '<ul class="rows">' + sources.map(function (s) {
-        var k = KIND[s.kind] || KIND.text;
-        var n = (s.cards || []).reduce(function (a, c) { return a + c.qty; }, 0);
-        return '<li class="r src"><span class="q" aria-hidden="true">' + k.icon + '</span>' +
-          '<span class="nm" style="cursor:default">' + esc(s.label || k.label) +
-          '<span class="d">' + k.label + ' · ' + (n ? n + ' cartas lidas' : '<strong style="color:var(--miss)">NÃO LIDA: não entra na comparação</strong>') + ' · ' + esc(fmtDate(s.createdAt).split(' ')[0]) + '</span></span>' +
-          (s.url ? '<a class="ib" href="' + esc(s.url) + '" target="_blank" rel="noopener" aria-label="Abrir ' + esc(s.label || 'link') + '">' + svg('<path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>') + '</a>' : '<span></span>') +
-          '<button class="ib" data-delsrc="' + esc(s.id) + '" aria-label="Remover fonte ' + esc(s.label || k.label) + '">' + svg('<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>') + '</button></li>';
-      }).join('') + '</ul><div style="padding:8px 16px"><a class="btn full" href="#/fonte/' + esc(d.id) + '">' + ICON.plus + 'Adicionar fonte</a></div>';
+      return h + '<p class="small">Adicione listas de torneio, decks de outros jogadores, prints e links. Eu comparo as listas e as cartas que mais aparecem entram aqui embaixo.</p>' +
+        '<a class="btn full" href="#/fonte/' + id + '">' + ICON.plus + 'Adicionar fonte</a></details>';
     }
-    html += '</section>';
-    if (!cons.length) return html;
-
-    var missingAll = cons.filter(function (c) { return c.count === c.total && !inDeck[FU.key(canonical(c.name))]; });
-    var gaps = cons.filter(function (c) { return !inDeck[FU.key(canonical(c.name))]; }), haves = cons.filter(function (c) { return inDeck[FU.key(canonical(c.name))]; });
-    function consRow(c) {
-      var info = cardInfo(c.name), have = inDeck[FU.key(canonical(c.name))];
-      return '<li class="r"><span class="q" aria-label="em ' + c.count + ' de ' + c.total + ' fontes" style="font-size:.8125rem;color:var(--muted)">' + c.count + '/' + c.total + '</span>' +
-        '<button class="nm" data-card="' + esc(c.name) + '">' + esc(canonical(c.name)) + '<span class="d">' + c.qty + ' cópia' + (c.qty > 1 ? 's' : '') + (c.board === 'side' ? ' · sideboard' : '') + '</span></button>' +
-        manaHtml(info && info.manaCost) +
-        (have ? '<span class="own done" aria-label="Já está no deck com ' + have + '"><i>✓ ' + have + '</i></span>'
-          : '<button class="own" data-addc="' + esc(c.name) + '" data-q="' + c.qty + '" data-b="' + c.board + '" aria-label="Adicionar ' + c.qty + ' ' + esc(canonical(c.name)) + ' ao deck"><i style="border-color:var(--accent);color:var(--accent)">+ ' + c.qty + '</i></button>') + '</li>';
-    }
-    html += '<section class="sec"><h2 class="sec-h">O que as listas usam e você não tem <span class="c">(' + gaps.length + ')</span></h2>' +
-      '<p class="xs muted" style="padding:0 16px 8px">Comparando o seu deck com ' + withCards + (withCards === 1 ? ' fonte lida' : ' fontes lidas') + (withCards < sources.length ? ' (' + (sources.length - withCards) + ' não ' + (sources.length - withCards === 1 ? 'foi lida e fica' : 'foram lidas e ficam') + ' de fora)' : '') + '. Ordenado por quantas fontes usam a carta. Toque em + para colocar no deck com a quantidade mais comum.</p>';
-    if (missingAll.length && withCards > 1) {
-      html += '<div style="padding:0 16px 8px"><button class="btn full" data-addall>' + ICON.plus + 'Adicionar as ' + missingAll.length + ' que estão em todas as fontes</button></div>';
-    }
-    var tiers = [['Em todas as fontes', function (c) { return c.count === c.total; }], ['Na maioria', function (c) { return c.count < c.total && c.count / c.total > 0.5; }], ['Em algumas', function (c) { return c.count / c.total <= 0.5; }]];
-    if (withCards === 1) tiers = [['Cartas da fonte', function () { return true; }]];
-    if (!gaps.length) html += '<p class="small" style="padding:0 16px 8px">O seu deck já tem todas as cartas das fontes lidas.</p>';
-    tiers.forEach(function (t) {
-      var list = gaps.filter(t[1]);
-      if (!list.length) return;
-      html += '<h3 class="sec-h" style="font-size:.875rem;padding-top:10px">' + t[0] + ' <span class="c">(' + list.length + ')</span></h3><ul class="rows">' + list.map(consRow).join('') + '</ul>';
-    });
-    html += '</section>';
-    if (haves.length) html += '<section class="sec"><details><summary class="sec-h" style="cursor:pointer;min-height:44px;display:flex;align-items:center">Já estão no seu deck <span class="c" style="margin-left:6px">(' + haves.length + ')</span></summary><ul class="rows">' + haves.map(consRow).join('') + '</ul></details></section>';
-    return html;
+    if (unread.length) h += '<p class="small err"><strong>' + unread.length + ' de ' + sources.length + (unread.length === 1 ? ' fontes não foi lida' : ' fontes não foram lidas') + '.</strong> O app não lê cartas por link (Moxfield, por exemplo). Fonte não lida não entra na comparação: abra a lista no site, copie o texto das cartas e cole.</p>';
+    h += '<ul class="rows">' + sources.map(function (x) {
+      var k = KIND[x.kind] || KIND.text, n = (x.cards || []).reduce(function (a, c) { return a + c.qty; }, 0);
+      return '<li class="r src"><span class="q" aria-hidden="true">' + k.icon + '</span>' +
+        '<span class="nm" style="cursor:default">' + esc(x.label || k.label) +
+        '<span class="d">' + k.label + ' · ' + (n ? n + ' cartas lidas' : '<strong style="color:var(--miss)">NÃO LIDA</strong>') + ' · ' + esc(fmtDate(x.createdAt).split(' ')[0]) + '</span>' +
+        (n ? '' : '<a class="btn primary" style="margin-top:6px" href="#/fonte/' + id + '?fill=' + esc(x.id) + '" aria-label="Colar a lista de ' + esc(x.label || 'link') + '">Colar a lista</a>') + '</span>' +
+        (x.url ? '<a class="ib" href="' + esc(x.url) + '" target="_blank" rel="noopener" aria-label="Abrir ' + esc(x.label || 'link') + '">' + svg('<path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>') + '</a>' : '<span></span>') +
+        '<button class="ib" data-delsrc="' + esc(x.id) + '" aria-label="Remover fonte ' + esc(x.label || k.label) + '">' + svg('<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>') + '</button></li>';
+    }).join('') + '</ul><a class="btn full" href="#/fonte/' + id + '">' + ICON.plus + 'Adicionar fonte</a></details>';
+    return h;
   }
 
   /* rascunho da fonte em edição (só em memória) */
@@ -1606,7 +1567,9 @@
       '<div id="srcHint" class="small" aria-live="polite">' + srcHint(draft.text) + '</div>' +
       '<p id="srcErr" class="err" role="alert">' + esc(draft.err) + '</p>' +
       '<button class="btn primary full" type="submit">' + (fillSrc ? 'Ler e salvar a lista' : 'Salvar fonte') + '</button>' +
-      '<p class="xs muted">Para um print de lista, mande a imagem para a sua IA e cole aqui o texto que ela devolver.</p></form>';
+      '<section class="stack" aria-labelledby="fpH" style="margin-top:8px"><h2 id="fpH" class="small"><strong>Só tem um print da lista?</strong></h2>' +
+      '<ol class="small" style="padding-left:20px;display:grid;gap:4px"><li>Toque em <strong>Copiar pedido</strong>.</li><li>Cole na sua IA e anexe o print.</li><li>Copie a resposta e cole no campo acima.</li></ol>' +
+      '<button type="button" class="btn full" data-fcopy>' + ICON.copy + 'Copiar pedido</button></section></form>';
     return html;
   }
   function srcHint(text) {
@@ -1619,7 +1582,7 @@
     if (s.label) bits.push('nome “' + esc(s.label) + '”');
     if (n) bits.push(n + (n === 1 ? ' carta' : ' cartas'));
     var out = '<p><strong>Entendi:</strong> ' + bits.join(' · ') + '</p>';
-    if (s.url && !n) out += '<p class="err" style="margin-top:4px"><strong>Atenção:</strong> o app não lê cartas por link. Se salvar só o link, esta fonte NÃO entra na comparação. Cole também a lista das cartas. ' + (site ? esc(site[1]) + ': ' + esc(site[2]) : 'Para as cartas entrarem no consenso, cole a lista também.') + '</p>';
+    if (s.url && !n) out += '<p class="err" style="margin-top:4px"><strong>Atenção:</strong> o app não lê cartas por link. Se salvar só o link, esta fonte NÃO entra na comparação. Cole também a lista das cartas. ' + (site ? esc(site[1]) + ': ' + esc(site[2]) : 'Para as cartas entrarem na comparação, cole a lista também.') + '</p>';
     return out;
   }
 
@@ -1662,7 +1625,7 @@
     var fillT = draft.fillId ? d.sources.filter(function (x) { return x.id === draft.fillId; })[0] : null;
     if (fillT) {
       fillT.cards = cards; fillT.readAt = Date.now();
-      state.ui.view[d.id + ':tab'] = 'research';
+      state.ui.view[d.id + ':tab'] = 'deck';
       persist(true);
       var nm0 = cards.map(function (c) { return c.name; }).filter(function (n) { var i = cardInfo(n); return !i || !i.typeLine; });
       draft = null; goReplace('#/deck/' + d.id);
@@ -1674,7 +1637,7 @@
       id: newId(), kind: draft.kind, label: draft.label.trim() || (draft.url ? (siteOf(draft.url) || [0, 'Link'])[1] : KIND[draft.kind].label + ' ' + (d.sources.length + 1)),
       url: (draft.url || '').trim(), cards: cards, createdAt: Date.now()
     });
-    state.ui.view[d.id + ':tab'] = 'research';
+    state.ui.view[d.id + ':tab'] = 'deck';
     persist(true);
     var names = cards.map(function (c) { return c.name; }).filter(function (n) { var i = cardInfo(n); return !i || !i.typeLine; });
     draft = null;
@@ -1803,6 +1766,11 @@
   ICO.cam = svg('<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>');
   var photo = null;
   var AIS = [['claude', 'Claude', 'https://claude.ai/new?q='], ['chatgpt', 'ChatGPT', 'https://chatgpt.com/?q='], ['gemini', 'Gemini', 'https://gemini.google.com/app']];
+  function listPrintPrompt() {
+    return ['Leia o print anexo. Ele mostra a lista de cartas de um deck de Magic: The Gathering.',
+      'Responda SOMENTE com a lista, uma carta por linha, neste formato: 4 Counterspell. Use o nome da carta em inglês. Se houver sideboard, escreva uma linha só com a palavra Sideboard antes das cartas do sideboard. Se não conseguir ler uma carta, escreva o que conseguir e coloque ? no fim da linha. Sem títulos, explicações nem comentários.',
+      'Coloque a lista inteira dentro de um único bloco de código (três crases), para eu copiar com um toque.'].join('\n\n');
+  }
   function photoPrompt() {
     return [
       'Vou te enviar foto(s) de cartas de Magic: The Gathering.',
@@ -1919,8 +1887,8 @@
       '<p class="small muted">Abra a carta na Liga (botão “Ver preço na Liga Magic” no pop-up da carta) e tire um print que mostre o nome e o bloco “Preço Médio de Venda no Marketplace”. Dá para mandar vários prints de uma vez.</p>' +
       '<button type="button" class="btn full" data-lnames style="margin-top:8px"' + (cv.miss.length ? '' : ' disabled') + '>' + ICON.copy + 'Copiar nomes das ' + cv.miss.length + ' sem preço</button></section>' +
       '<section aria-labelledby="l2"><h2 id="l2" class="ph-h"><span aria-hidden="true">2</span>Peça os preços para a sua IA</h2>' +
-      '<p class="small muted">Eu copio um prompt pronto. Abra a IA que você usa, cole o prompt e mande os prints na mesma conversa.</p>' +
-      '<button type="button" class="btn primary full" data-lcopy style="margin-top:8px">' + ICON.copy + 'Copiar prompt</button>' +
+      '<p class="small muted">Eu copio um pedido pronto. Abra a IA que você usa, cole o pedido e mande os prints na mesma conversa.</p>' +
+      '<button type="button" class="btn primary full" data-lcopy style="margin-top:8px">' + ICON.copy + 'Copiar pedido</button>' +
       '<div class="aibtns">' + AIS.map(function (a) { return '<button type="button" class="btn" data-lai="' + a[0] + '">Copiar e abrir ' + a[1] + '</button>'; }).join('') + '</div></section>' +
       '<section aria-labelledby="l3"><h2 id="l3" class="ph-h"><span aria-hidden="true">3</span>Cole a resposta aqui</h2>' +
       '<label for="ltext" class="visually-hidden">Resposta da IA</label><textarea id="ltext" spellcheck="false" autocapitalize="off" placeholder="Eternal Dragon | 3,00 | 7,72 | 100,00&#10;Sol Ring | 1,50 | 2,80 | 9,00" style="margin-top:8px">' + esc(lp.text) + '</textarea>' +
@@ -2021,10 +1989,10 @@
       '<p class="small" style="margin-top:8px"><strong>Dica para a foto sair boa:</strong> abra as cartas em leque (sem empilhar) e fotografe 8 a 10 por vez, com luz boa e sem reflexo.</p>' +
       '<p class="xs muted" style="margin-top:8px">As cartas entram marcadas como “tenho”. ' + (photo.target === 'colecao' ? 'Ficam na Coleção, fora de qualquer deck.' : 'Se a foto tiver mais cópias do que o deck pede, as que sobram vão para a Coleção.') + '</p></section>' +
       '<section aria-labelledby="p2"><h2 id="p2" class="ph-h"><span aria-hidden="true">2</span>Peça a lista para a sua IA</h2>' +
-      '<p class="small muted">Eu copio um prompt pronto. Abra a IA que você usa, cole o prompt e mande a foto do deck ou das cartas na mesma conversa.</p>' +
-      '<button type="button" class="btn primary full" data-pcopy style="margin-top:8px">' + ICON.copy + 'Copiar prompt</button>' +
+      '<p class="small muted">Eu copio um pedido pronto. Abra a IA que você usa, cole o pedido e mande a foto do deck ou das cartas na mesma conversa.</p>' +
+      '<button type="button" class="btn primary full" data-pcopy style="margin-top:8px">' + ICON.copy + 'Copiar pedido</button>' +
       '<div class="aibtns">' + AIS.map(function (a) { return '<button type="button" class="btn" data-pai="' + a[0] + '">Copiar e abrir ' + a[1] + '</button>'; }).join('') + '</div>' +
-      '<p class="xs muted" style="margin-top:8px">Funciona com qualquer IA que aceite foto. Se a IA abrir sem o prompt preenchido, é só colar.</p></section>' +
+      '<p class="xs muted" style="margin-top:8px">Funciona com qualquer IA que aceite foto. Se a IA abrir sem o pedido preenchido, é só colar.</p></section>' +
       '<section aria-labelledby="p3"><h2 id="p3" class="ph-h"><span aria-hidden="true">3</span>Cole a resposta aqui</h2>' +
       '<p class="small muted">Na IA, toque em copiar na lista que ela devolveu e volte aqui.</p>' +
       '<label for="ptext" class="visually-hidden">Resposta da IA</label><textarea id="ptext" spellcheck="false" autocapitalize="off" placeholder="1 Swords to Plowshares (TMP) 123&#10;2 Counterspell (7ED) 67" style="margin-top:8px">' + esc(photo.text) + '</textarea>' +
@@ -2217,12 +2185,6 @@
     if (!ks.length) return 'Ainda sem dados salvos.';
     var last = ks.map(function (k) { return state.meta.decks[k].date || ''; }).sort().pop();
     return 'Dados salvos de ' + ks.length + (ks.length === 1 ? ' deck' : ' decks') + ' · mais recente: ' + metaDateText(last) + '.';
-  }
-  function metaSectionHtml() {
-    return '<section class="card pad stack" aria-labelledby="mg"><h2 id="mg" style="font-size:1.0625rem">Importar winrates</h2>' +
-      '<p class="muted small">O app já traz a taxa de vitória dos decks Premodern contra os outros decks. O resultado aparece no fim de cada deck, com a fonte e a data.</p>' +
-      '<p class="small"><strong>' + esc(metaSummaryLine()) + '</strong></p>' +
-      '<a class="btn primary full" href="#/meta">Importar winrates</a></section>';
   }
   function viewMeta() {
     barAction.innerHTML = ''; fab.innerHTML = '';
@@ -2441,7 +2403,7 @@
     var list = d.consider || [], id = esc(d.id), need = consNeedOf(d), val = 0;
     list.forEach(function (c) { var b = unitBrl(cardInfo(c.name)); if (b != null) val += b * Math.max(0, c.qty - Math.min(c.qty, spareQty(c.name))); });
     var h = '<section class="card pad stack cons" aria-labelledby="csH" style="margin:16px"><h2 id="csH" tabindex="-1" style="font-size:1.0625rem">Em consideração' + (list.length ? ' <span class="muted">(' + list.length + ')</span>' : '') + '</h2>' +
-      '<p class="small muted">Cartas que talvez entrem. Já vêm as que aparecem nas suas listas da Pesquisa. Marque <strong>Tenho</strong> quando tiver. Contam em “O que me falta” e no preço, mas não no selo “Completo”.</p>' +
+      '<p class="small muted">Cartas que talvez entrem. Já vêm as que aparecem nas suas fontes. Marque <strong>Tenho</strong> quando tiver. Contam em “O que me falta” e no preço, mas não no selo “Completo”.</p>' +
       '<label for="acIn" class="visually-hidden">Buscar carta para adicionar</label>' +
       '<div class="acrow"><input type="text" id="acIn" data-acdeck="' + id + '" data-acmode="consider" autocomplete="off" spellcheck="false" autocapitalize="off" enterkeyhint="search" placeholder="Buscar carta (inglês ou português)" aria-describedby="acHelp" aria-controls="acList">' +
       '<button type="button" class="btn primary" data-acgo>' + ICON.plus + 'Adicionar</button></div>' +
@@ -2460,10 +2422,8 @@
       }).join('') + '</ul>';
       if (need) h += '<p class="small"><strong>Faltam ' + need + (need === 1 ? ' carta' : ' cartas') + '</strong>' + (val ? ' · ≈ ' + brl0.format(val) : '') + ' desta lista.</p>';
     }
-    var unreadN = (d.sources || []).filter(function (x) { return !(x.cards && x.cards.length); }).length;
-    if (unreadN) h += '<p class="small err"><strong>' + unreadN + (unreadN === 1 ? ' fonte da Pesquisa não foi lida' : ' fontes da Pesquisa não foram lidas') + '</strong> e fica de fora desta comparação. <button type="button" class="link" data-dtab="research">Colar as listas</button></p>';
     var pool = FU.considerPool(d, canonical), srcN = (d.sources || []).filter(function (x) { return x.cards && x.cards.length; }).length;
-    if (!list.length) h += '<p class="small">' + (!srcN ? ((d.sources || []).length ? '<strong>As ' + d.sources.length + (d.sources.length === 1 ? ' fonte da aba Pesquisa é só um link' : ' fontes da aba Pesquisa são só links') + ', sem cartas lidas.</strong> Eu só comparo listas que tenham as cartas (texto colado ou lido de print). Adicione a lista com as cartas na aba Pesquisa.' : '<strong>Este deck não tem listas na aba Pesquisa.</strong> Junte listas lá e as cartas delas aparecem aqui. Você também pode buscar uma carta acima.')
+    if (!list.length) h += '<p class="small">' + (!srcN ? ((d.sources || []).length ? '<strong>As ' + d.sources.length + (d.sources.length === 1 ? ' fonte é só um link' : ' fontes são só links') + ', sem cartas lidas.</strong> Eu só comparo listas que tenham as cartas (texto colado ou lido de print). Cole a lista com as cartas em Fontes, abaixo.' : '<strong>Este deck não tem fontes.</strong> Adicione listas em Fontes, abaixo, e as cartas delas aparecem aqui. Você também pode buscar uma carta acima.')
       : (pool.length ? 'Nenhuma carta apareceu em 2 ou mais das suas ' + srcN + (srcN === 1 ? ' lista' : ' listas') + '. As que aparecem em uma só estão logo abaixo.'
         : 'Todas as cartas das suas ' + srcN + (srcN === 1 ? ' lista' : ' listas') + ' já estão no deck ou foram removidas daqui.')) + '</p>';
     if (pool.length) {
@@ -2476,7 +2436,7 @@
             '<span class="ra"><button class="own" data-conspool="' + id + '|' + esc(c.name) + '" aria-label="Adicionar ' + esc(canonical(c.name)) + ' à lista Em consideração"><i style="border-color:var(--accent);color:var(--accent)">+</i></button></span></li>';
         }).join('') + '</ul>' + (pool.length > 40 ? '<p class="xs muted">Mostrando as 40 que aparecem em mais listas.</p>' : '') + '</details>';
     }
-    return h + '</section>';
+    return h + sourcesHtml(d) + '</section>';
   }
   /* Acha a carta da lista pelo índice E pelo nome: se a lista mudou desde que a tela foi desenhada, não age na carta errada. */
   function consEntry(d, idx, name) {
@@ -2551,7 +2511,7 @@
     return '<h2 id="sheetTitle">' + (guideMu ? 'Sugestão da IA: contra ' + esc(guideMu.r.o) : 'Importar guia pela IA') + '</h2>' +
       '<ol class="small" style="padding-left:20px;display:grid;gap:6px"><li>Toque em <strong>Copiar pedido</strong>.</li><li>Cole na sua IA' + (guideMu ? '.' : ' e anexe o print do guia.') + '</li><li>Copie a resposta e cole aqui embaixo.</li></ol>' +
       '<button type="button" class="btn primary full" data-gcopy style="margin-top:8px">' + ICON.copy + 'Copiar pedido</button>' +
-      '<button type="button" class="btn full" data-gai style="margin-top:8px">Abrir o Claude com o pedido</button>' +
+      '<button type="button" class="btn full" data-gai style="margin-top:8px">Copiar e abrir ' + AIS[0][1] + '</button>' +
       '<label for="gIn" class="small" style="display:block;margin-top:16px"><strong>Resposta da IA</strong></label>' +
       '<textarea id="gIn" aria-describedby="gMsg" spellcheck="false" autocapitalize="off" style="min-height:160px;margin-top:6px">' + esc(guideText) + '</textarea>' +
       '<p class="xs muted" id="gMsg" role="status" style="margin-top:6px"></p>' +
@@ -2568,6 +2528,7 @@
     g.guides.forEach(function (b) {
       var t = FU.guideTotals(b), note = { plan: { in: b.in, out: b.out }, partial: !t.known };
       h += '<section class="gp"><h3 class="small"><strong>Contra ' + esc(b.opp) + '</strong>' + (d.mu && Object.prototype.hasOwnProperty.call(d.mu, guideKey(d, b.opp)) ? ' · substitui o guia salvo' : '') + '</h3>' +
+        (d.format === 'Premodern' && archOf(d) && FU.sideNote(archOf(d), b.opp) ? '<p class="small">' + chip('mid', 'Já existe um guia conferido para este confronto') + ' O seu fica guardado em “Seus guias importados”, e o conferido continua na linha do confronto.</p>' : '') +
         ((b.in.length || b.out.length) ? planHtml(d, note, lookup) : '') +
         (t.known && !t.balanced ? '<p class="small">' + chip('mid', 'Entram ' + t.in + ' e saem ' + t.out + ': não bate. Confira o print.') + '</p>' : '') +
         (b.notes.length ? '<ul class="plist">' + b.notes.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' : '') +
@@ -2881,19 +2842,20 @@
     if (t.hasAttribute('data-mclear')) { if (confirm('Apagar os dados de confronto salvos? Os decks não mudam.')) { delete state.meta; persist(true); render(); toast('Dados apagados.'); } return; }
     if (t.hasAttribute('data-photo')) { location.hash = '#/foto/' + t.getAttribute('data-photo'); return; }
     if (t.hasAttribute('data-ctab')) { state.ui.colTab = t.getAttribute('data-ctab'); persist(false); render(); keepFocus('[data-ctab="' + state.ui.colTab + '"]'); return; }
-    if (t.hasAttribute('data-pcopy')) { copyText(photoPrompt(), 'Prompt copiado. Cole na sua IA e mande a foto.'); return; }
+    if (t.hasAttribute('data-fcopy')) { copyText(listPrintPrompt(), 'Pedido copiado. Cole na sua IA e anexe o print.'); return; }
+    if (t.hasAttribute('data-pcopy')) { copyText(photoPrompt(), 'Pedido copiado. Cole na sua IA e mande a foto.'); return; }
     if (t.hasAttribute('data-pai')) {
       var ai = AIS.filter(function (a) { return a[0] === t.getAttribute('data-pai'); })[0];
       readPhotoInputs();
-      copyText(photoPrompt(), 'Prompt copiado. Se a IA abrir vazia, é só colar.');
+      copyText(photoPrompt(), 'Pedido copiado. Se a IA abrir vazia, é só colar.');
       window.open(ai[2] + (ai[0] === 'gemini' ? '' : encodeURIComponent(photoPrompt())), '_blank', 'noopener');
       return;
     }
-    if (t.hasAttribute('data-lcopy')) { copyText(precosPrompt(), 'Prompt copiado. Cole na sua IA e mande os prints.'); return; }
+    if (t.hasAttribute('data-lcopy')) { copyText(precosPrompt(), 'Pedido copiado. Cole na sua IA e mande os prints.'); return; }
     if (t.hasAttribute('data-lai')) {
       var lai = AIS.filter(function (a) { return a[0] === t.getAttribute('data-lai'); })[0];
       readLpInputs();
-      copyText(precosPrompt(), 'Prompt copiado. Se a IA abrir vazia, é só colar.');
+      copyText(precosPrompt(), 'Pedido copiado. Se a IA abrir vazia, é só colar.');
       window.open(lai[2] + (lai[0] === 'gemini' ? '' : encodeURIComponent(precosPrompt())), '_blank', 'noopener');
       return;
     }
@@ -3011,7 +2973,7 @@
       persist(true);
     } else {
       deck = addDeck(name, format, text).deck;
-      if (!deck.cards.length && format !== 'Lista') state.ui.view[deck.id + ':tab'] = 'research';
+      if (!deck.cards.length && format !== 'Lista') state.ui.view[deck.id + ':tab'] = 'deck';
       deck.cards.forEach(function (c) { var tk3 = takeSpareEds(c.name, c.qty); c.owned = tk3.n; c.eds = tk3.eds; });
       if (markAll) FU.markAllOwned(deck.cards);
       persist(true);
@@ -3113,7 +3075,7 @@
   }
   function syncSectionHtml() {
     var sy = loadSync();
-    var h = '<section class="card pad stack" aria-labelledby="sy"><h2 id="sy" style="font-size:1.0625rem">Backup automático</h2>';
+    var h = '<section class="card pad stack" aria-labelledby="sy"><h3 id="sy" style="font-size:1.0625rem">Backup automático</h3>';
     if (sy.key) {
       h += '<p class="small">Ativo. Cada mudança nos decks é salva na nuvem sozinha, sem você fazer nada.</p>' +
         '<p class="small" id="syStatus" role="status" aria-live="polite"><strong>' + esc(syncMsg || (sy.at ? 'Último salvamento: ' + hhmm(sy.at) + '.' : 'Ainda não salvou.')) + '</strong></p>' +
@@ -3121,7 +3083,7 @@
         '<button class="btn full" data-act="syncrestore">Voltar da nuvem</button>' +
         '<button class="btn full" data-act="syncoff">Desativar neste celular</button>';
     } else {
-      h += '<p class="muted small">Salva seus decks na nuvem a cada mudança. Precisa de uma chave (só quem recebeu uma chave consegue ativar). Sem chave, use o backup pelo WhatsApp logo abaixo.</p>' +
+      h += '<p class="muted small">Salva seus decks na nuvem a cada mudança. Precisa de uma chave. Sem chave, use o backup manual abaixo.</p>' +
         '<p class="small" id="syStatus" role="status" aria-live="polite">' + (syncMsg ? '<strong>' + esc(syncMsg) + '</strong>' : '') + '</p>' +
         '<label for="syKey" class="small">Chave do backup</label>' +
         '<input id="syKey" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="xxxx-xxxx-xxxx">' +

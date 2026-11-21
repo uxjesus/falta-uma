@@ -1,5 +1,5 @@
 /* Playset — funciona offline. Troque VERSION a cada publicação. */
-var VERSION = 'fu-v0.30.1';
+var VERSION = 'fu-v0.31.0';
 var SHELL = ['./', 'index.html', 'logic.js', 'app.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 var IMG_CACHE = 'fu-img-v1';
 var SHARE_CACHE = 'fu-share';

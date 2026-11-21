@@ -50,7 +50,7 @@ h1,h2,h3{margin:0}
 /* barra do app: só marca + ícones */
 .appbar{position:sticky;top:0;z-index:10;background:var(--bg);border-bottom:1px solid var(--line)}
 .appbar .in{max-width:880px;margin:0 auto;padding:4px 4px 4px 16px;display:flex;align-items:center;gap:4px;min-height:56px}
-.brand{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.02em;text-transform:uppercase;font-size:.9375rem;text-decoration:none;color:var(--text)}
+.brand{min-height:44px;display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.02em;text-transform:uppercase;font-size:.9375rem;text-decoration:none;color:var(--text)}
 .brand img{width:26px;height:26px;border-radius:6px}
 .appbar .spacer{flex:1}
 .wrap{max-width:880px;margin:0 auto}
@@ -210,7 +210,7 @@ dialog.sheet[open]{animation:up .18s ease-out}
 /* formulários e blocos */
 .form{padding:16px;display:grid;grid-template-columns:minmax(0,1fr);gap:16px}
 label{display:block;font-weight:700;margin-bottom:6px}
-input[type=text],select.field,textarea{width:100%;min-height:var(--tap);padding:10px 12px;border-radius:var(--r-sm);border:1px solid var(--line-strong);background:var(--surface)}
+input[type=search],input[type=text],select.field,textarea{width:100%;min-height:var(--tap);padding:10px 12px;border-radius:var(--r-sm);border:1px solid var(--line-strong);background:var(--surface)}
 textarea{min-height:240px;font-family:var(--mono);font-size:.9375rem;line-height:1.45}
 .err{color:var(--miss);font-weight:700}
 .card{background:var(--surface);border-radius:var(--r)}
@@ -402,6 +402,8 @@ a.lg .icon{width:20px;height:20px}
 .mu-row .s{grid-column:1/-1;font-size:.8125rem;color:var(--muted)}
 .mu-panel{display:grid;grid-template-columns:minmax(0,1fr);min-width:0;gap:10px;padding:12px;margin-top:-4px;border:1.5px solid var(--line-strong);border-left:4px solid var(--accent);border-radius:var(--r-sm);background:var(--surface)}
 .mu-row[aria-expanded="true"] .s{color:var(--text)}
+.srcbox{border-top:1.5px solid var(--line-strong);padding-top:4px}
+.srcbox>*:not(summary){margin-top:8px}
 .mu-panel .chip{white-space:normal;max-width:100%}
 .mu-panel .lnk{display:inline-flex;align-items:center;min-height:44px;font-weight:700}
 .primer{margin:16px;padding:16px;display:grid;gap:10px;border-radius:var(--r);background:var(--accent-soft);border:1.5px solid var(--accent);border-left-width:6px}
