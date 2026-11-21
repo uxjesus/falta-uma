@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.29.2';
+  var APP_VERSION = '0.30.0';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -962,6 +962,7 @@
         '<button class="btn primary full" data-ownapply style="margin-top:12px">Marcar no deck</button>';
     }
     else if (type === 'swap') { var sw = String(ctx).split('|'), sd = deckById(sw[0]), se = consEntry(sd, +sw[1], sw.slice(2).join('|')); html = se ? considerSwapSheet(sd, se) : '<p>Carta não encontrada.</p>'; }
+    else if (type === 'consact') { var ca0 = String(ctx).split('|'), cad = deckById(ca0[0]), cae = consEntry(cad, +ca0[1], ca0.slice(2).join('|')); html = cae ? considerActionSheet(cad, cae) : '<p>Carta não encontrada.</p>'; }
     else if (type === 'guide') { guideDraft = null; var gd = deckById(ctx); html = gd ? guideInputHtml(gd) : '<p>Deck não encontrado.</p>'; }
     sheetBody.innerHTML = html;
     if (!sheet.open) sheet.showModal();
@@ -970,6 +971,19 @@
     var t = e.target.closest('button');
     if (!t || !sheetCtx) return;
     var ctx = sheetCtx.ctx;
+    if (sheetCtx.type === 'consact') {
+      var cp = String(ctx).split('|'), cdk = deckById(cp[0]), cnm = cp.slice(2).join('|');
+      if (!cdk || !consEntry(cdk, +cp[1], cnm)) { toast('A lista mudou. Abra a carta de novo.'); sheet.close(); return; }
+      if (t.hasAttribute('data-caswap')) { openSheet('swap', ctx, null); return; }
+      var cdone = null;
+      if (t.hasAttribute('data-cadeck')) { cdone = consToDeck(cdk, +cp[1], cnm); if (cdone) toast(cdone.name + ' entrou no ' + (cdone.board === 'side' ? 'sideboard' : 'deck') + '.'); }
+      else if (t.hasAttribute('data-carm')) { cdone = consDrop(cdk, +cp[1], cnm); if (cdone) toast('Tirei ' + cdone.name + ' da lista.'); }
+      else return;
+      persist(true); sheet.close();
+      var yc = window.scrollY; render(); window.scrollTo(0, yc);
+      var fcn = document.getElementById('csH'); if (fcn) fcn.focus({ preventScroll: true });
+      return;
+    }
     if (sheetCtx.type === 'swap') {
       if (!t.hasAttribute('data-swout')) return;
       var sp = String(ctx).split('|'), sdk = deckById(sp[0]);
@@ -1514,7 +1528,15 @@
     var inDeck = {};
     d.cards.forEach(function (c) { inDeck[FU.key(canonical(c.name))] = (inDeck[FU.key(canonical(c.name))] || 0) + c.qty; });
     var withCards = sources.filter(function (s) { return s.cards && s.cards.length; }).length;
-    var html = '<section class="sec"><h2 class="sec-h">Fontes <span class="c">(' + sources.length + ')</span></h2>';
+    var unread = sources.filter(function (x) { return !(x.cards && x.cards.length); });
+    var html = '<section class="sec"><h2 class="sec-h">Fontes <span class="c">(' + sources.length + (unread.length ? ' · ' + withCards + ' lidas' : '') + ')</span></h2>';
+    if (unread.length) {
+      html += '<div class="card pad stack warnbox" style="margin:4px 16px 8px" role="group" aria-labelledby="unH"><h3 id="unH" style="font-size:1rem">' + unread.length + ' de ' + sources.length + (unread.length === 1 ? ' fonte não foi lida' : ' fontes não foram lidas') + '</h3>' +
+        '<p class="small">O app não consegue ler as cartas de um link (Moxfield, por exemplo). Fonte que não foi lida <strong>não entra</strong> no consenso nem no “Em consideração”. Abra a lista no site, copie o texto das cartas e cole aqui.</p>' +
+        '<ul class="cons-list">' + unread.map(function (x) {
+          return '<li class="cr"><div class="cn"><span class="nm" style="cursor:default">' + esc(x.label || 'Link') + '</span></div><div class="ca"><a class="btn primary" href="#/fonte/' + esc(d.id) + '?fill=' + esc(x.id) + '" aria-label="Colar a lista de ' + esc(x.label || 'link') + '">Colar a lista</a></div></li>';
+        }).join('') + '</ul></div>';
+    }
     if (!sources.length) {
       html += '<div class="card pad stack" style="margin:4px 16px"><p><strong>Junte referências para montar a sua lista.</strong></p>' +
         '<p class="muted small">Adicione listas de torneio, decks de outros jogadores, prints e links. Eu mostro quais cartas aparecem em mais fontes, e você escolhe o que entra no seu deck.</p>' +
@@ -1525,7 +1547,7 @@
         var n = (s.cards || []).reduce(function (a, c) { return a + c.qty; }, 0);
         return '<li class="r src"><span class="q" aria-hidden="true">' + k.icon + '</span>' +
           '<span class="nm" style="cursor:default">' + esc(s.label || k.label) +
-          '<span class="d">' + k.label + ' · ' + (n ? n + ' cartas' : 'link salvo, sem cartas lidas') + ' · ' + esc(fmtDate(s.createdAt).split(' ')[0]) + '</span></span>' +
+          '<span class="d">' + k.label + ' · ' + (n ? n + ' cartas lidas' : '<strong style="color:var(--miss)">NÃO LIDA: não entra na comparação</strong>') + ' · ' + esc(fmtDate(s.createdAt).split(' ')[0]) + '</span></span>' +
           (s.url ? '<a class="ib" href="' + esc(s.url) + '" target="_blank" rel="noopener" aria-label="Abrir ' + esc(s.label || 'link') + '">' + svg('<path d="M14 4h6v6M20 4l-9 9M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/>') + '</a>' : '<span></span>') +
           '<button class="ib" data-delsrc="' + esc(s.id) + '" aria-label="Remover fonte ' + esc(s.label || k.label) + '">' + svg('<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>') + '</button></li>';
       }).join('') + '</ul><div style="padding:8px 16px"><a class="btn full" href="#/fonte/' + esc(d.id) + '">' + ICON.plus + 'Adicionar fonte</a></div>';
@@ -1534,29 +1556,31 @@
     if (!cons.length) return html;
 
     var missingAll = cons.filter(function (c) { return c.count === c.total && !inDeck[FU.key(canonical(c.name))]; });
-    html += '<section class="sec"><h2 class="sec-h">Consenso <span class="c">(' + cons.length + ' cartas em ' + withCards + (withCards === 1 ? ' fonte' : ' fontes') + ')</span></h2>' +
-      '<p class="xs muted" style="padding:0 16px 8px">Ordenado por quantas fontes usam a carta. Toque em + para colocar no seu deck com a quantidade mais comum.</p>';
+    var gaps = cons.filter(function (c) { return !inDeck[FU.key(canonical(c.name))]; }), haves = cons.filter(function (c) { return inDeck[FU.key(canonical(c.name))]; });
+    function consRow(c) {
+      var info = cardInfo(c.name), have = inDeck[FU.key(canonical(c.name))];
+      return '<li class="r"><span class="q" aria-label="em ' + c.count + ' de ' + c.total + ' fontes" style="font-size:.8125rem;color:var(--muted)">' + c.count + '/' + c.total + '</span>' +
+        '<button class="nm" data-card="' + esc(c.name) + '">' + esc(canonical(c.name)) + '<span class="d">' + c.qty + ' cópia' + (c.qty > 1 ? 's' : '') + (c.board === 'side' ? ' · sideboard' : '') + '</span></button>' +
+        manaHtml(info && info.manaCost) +
+        (have ? '<span class="own done" aria-label="Já está no deck com ' + have + '"><i>✓ ' + have + '</i></span>'
+          : '<button class="own" data-addc="' + esc(c.name) + '" data-q="' + c.qty + '" data-b="' + c.board + '" aria-label="Adicionar ' + c.qty + ' ' + esc(canonical(c.name)) + ' ao deck"><i style="border-color:var(--accent);color:var(--accent)">+ ' + c.qty + '</i></button>') + '</li>';
+    }
+    html += '<section class="sec"><h2 class="sec-h">O que as listas usam e você não tem <span class="c">(' + gaps.length + ')</span></h2>' +
+      '<p class="xs muted" style="padding:0 16px 8px">Comparando o seu deck com ' + withCards + (withCards === 1 ? ' fonte lida' : ' fontes lidas') + (withCards < sources.length ? ' (' + (sources.length - withCards) + ' não ' + (sources.length - withCards === 1 ? 'foi lida e fica' : 'foram lidas e ficam') + ' de fora)' : '') + '. Ordenado por quantas fontes usam a carta. Toque em + para colocar no deck com a quantidade mais comum.</p>';
     if (missingAll.length && withCards > 1) {
       html += '<div style="padding:0 16px 8px"><button class="btn full" data-addall>' + ICON.plus + 'Adicionar as ' + missingAll.length + ' que estão em todas as fontes</button></div>';
     }
     var tiers = [['Em todas as fontes', function (c) { return c.count === c.total; }], ['Na maioria', function (c) { return c.count < c.total && c.count / c.total > 0.5; }], ['Em algumas', function (c) { return c.count / c.total <= 0.5; }]];
     if (withCards === 1) tiers = [['Cartas da fonte', function () { return true; }]];
+    if (!gaps.length) html += '<p class="small" style="padding:0 16px 8px">O seu deck já tem todas as cartas das fontes lidas.</p>';
     tiers.forEach(function (t) {
-      var list = cons.filter(t[1]);
+      var list = gaps.filter(t[1]);
       if (!list.length) return;
-      html += '<h3 class="sec-h" style="font-size:.875rem;padding-top:10px">' + t[0] + ' <span class="c">(' + list.length + ')</span></h3><ul class="rows">';
-      list.forEach(function (c) {
-        var info = cardInfo(c.name);
-        var have = inDeck[FU.key(canonical(c.name))];
-        html += '<li class="r"><span class="q" aria-label="em ' + c.count + ' de ' + c.total + ' fontes" style="font-size:.8125rem;color:var(--muted)">' + c.count + '/' + c.total + '</span>' +
-          '<button class="nm" data-card="' + esc(c.name) + '">' + esc(canonical(c.name)) + '<span class="d">' + c.qty + ' cópia' + (c.qty > 1 ? 's' : '') + (c.board === 'side' ? ' · sideboard' : '') + '</span></button>' +
-          manaHtml(info && info.manaCost) +
-          (have ? '<span class="own done" aria-label="Já está no deck com ' + have + '"><i>✓ ' + have + '</i></span>'
-            : '<button class="own" data-addc="' + esc(c.name) + '" data-q="' + c.qty + '" data-b="' + c.board + '" aria-label="Adicionar ' + c.qty + ' ' + esc(canonical(c.name)) + ' ao deck"><i style="border-color:var(--accent);color:var(--accent)">+ ' + c.qty + '</i></button>') + '</li>';
-      });
-      html += '</ul>';
+      html += '<h3 class="sec-h" style="font-size:.875rem;padding-top:10px">' + t[0] + ' <span class="c">(' + list.length + ')</span></h3><ul class="rows">' + list.map(consRow).join('') + '</ul>';
     });
-    return html + '</section>';
+    html += '</section>';
+    if (haves.length) html += '<section class="sec"><details><summary class="sec-h" style="cursor:pointer;min-height:44px;display:flex;align-items:center">Já estão no seu deck <span class="c" style="margin-left:6px">(' + haves.length + ')</span></summary><ul class="rows">' + haves.map(consRow).join('') + '</ul></details></section>';
+    return html;
   }
 
   /* rascunho da fonte em edição (só em memória) */
@@ -1567,18 +1591,21 @@
     var d = deckById(deckId);
     barAction.innerHTML = ''; fab.innerHTML = '';
     if (!d) return '<div class="card empty"><p>Deck não encontrado.</p></div>';
-    if (!draft || draft.deckId !== deckId) draft = newDraft(deckId);
+    var fq = /(?:^|&)fill=([^&]+)/.exec(route().query || ''), fillId = fq ? decodeURIComponent(fq[1]) : '';
+    var fillSrc = fillId ? (d.sources || []).filter(function (x) { return x.id === fillId; })[0] : null;
+    if (!fillSrc) fillId = '';
+    if (!draft || draft.deckId !== deckId || (draft.fillId || '') !== fillId) { draft = newDraft(deckId); draft.fillId = fillId; }
     var html = '<header class="head"><a href="#/deck/' + esc(d.id) + '" class="link" style="margin-left:-4px" data-dropdraft>' + ICON.back + esc(d.name) + '</a>' +
-      '<h1>Adicionar fonte</h1></header>';
+      '<h1>' + (fillSrc ? 'Colar a lista' : 'Adicionar fonte') + '</h1></header>';
 
     if (draft.stage === 'review') return html + reviewHtml();
 
     html += '<form id="srcForm" class="form" novalidate>' +
-      '<div><label for="st">Cole aqui</label><p class="small muted" id="sth" style="margin:0 0 8px">Um link, uma lista (ex.: 4 Counterspell) ou os dois. Se escrever um texto junto, ele vira o nome da fonte.</p>' +
+      '<div><label for="st">' + (fillSrc ? 'Cole as cartas de “' + esc(fillSrc.label || 'link') + '”' : 'Cole aqui') + '</label><p class="small muted" id="sth" style="margin:0 0 8px">' + (fillSrc ? 'Abra a lista no site, copie o texto das cartas (no Moxfield: Export, copiar como texto) e cole aqui, uma carta por linha, ex.: 4 Counterspell.' : 'Um link, uma lista (ex.: 4 Counterspell) ou os dois. Se escrever um texto junto, ele vira o nome da fonte.') + '</p>' +
       '<textarea id="st" aria-describedby="sth srcHint" spellcheck="false" autocapitalize="off" placeholder="https://moxfield.com/decks/…&#10;Campeão do torneio de outubro&#10;4 Counterspell">' + esc(draft.text) + '</textarea></div>' +
       '<div id="srcHint" class="small" aria-live="polite">' + srcHint(draft.text) + '</div>' +
       '<p id="srcErr" class="err" role="alert">' + esc(draft.err) + '</p>' +
-      '<button class="btn primary full" type="submit">Salvar fonte</button>' +
+      '<button class="btn primary full" type="submit">' + (fillSrc ? 'Ler e salvar a lista' : 'Salvar fonte') + '</button>' +
       '<p class="xs muted">Para um print de lista, mande a imagem para a sua IA e cole aqui o texto que ela devolver.</p></form>';
     return html;
   }
@@ -1592,7 +1619,7 @@
     if (s.label) bits.push('nome “' + esc(s.label) + '”');
     if (n) bits.push(n + (n === 1 ? ' carta' : ' cartas'));
     var out = '<p><strong>Entendi:</strong> ' + bits.join(' · ') + '</p>';
-    if (s.url && !n) out += '<p class="muted" style="margin-top:4px">Só o link fica salvo: os sites ainda não deixam o app ler as cartas pelo link. ' + (site ? esc(site[1]) + ': ' + esc(site[2]) : 'Para as cartas entrarem no consenso, cole a lista também.') + '</p>';
+    if (s.url && !n) out += '<p class="err" style="margin-top:4px"><strong>Atenção:</strong> o app não lê cartas por link. Se salvar só o link, esta fonte NÃO entra na comparação. Cole também a lista das cartas. ' + (site ? esc(site[1]) + ': ' + esc(site[2]) : 'Para as cartas entrarem no consenso, cole a lista também.') + '</p>';
     return out;
   }
 
@@ -1632,6 +1659,17 @@
   function saveDraftSource(cards) {
     var d = deckById(draft.deckId);
     d.sources = d.sources || [];
+    var fillT = draft.fillId ? d.sources.filter(function (x) { return x.id === draft.fillId; })[0] : null;
+    if (fillT) {
+      fillT.cards = cards; fillT.readAt = Date.now();
+      state.ui.view[d.id + ':tab'] = 'research';
+      persist(true);
+      var nm0 = cards.map(function (c) { return c.name; }).filter(function (n) { var i = cardInfo(n); return !i || !i.typeLine; });
+      draft = null; goReplace('#/deck/' + d.id);
+      toast('Lista lida: ' + cards.reduce(function (a, c) { return a + c.qty; }, 0) + ' cartas entraram na comparação.');
+      if (nm0.length) refreshPrices({ only: nm0, silent: true });
+      return;
+    }
     d.sources.push({
       id: newId(), kind: draft.kind, label: draft.label.trim() || (draft.url ? (siteOf(draft.url) || [0, 'Link'])[1] : KIND[draft.kind].label + ' ' + (d.sources.length + 1)),
       url: (draft.url || '').trim(), cards: cards, createdAt: Date.now()
@@ -1641,7 +1679,7 @@
     var names = cards.map(function (c) { return c.name; }).filter(function (n) { var i = cardInfo(n); return !i || !i.typeLine; });
     draft = null;
     goReplace('#/deck/' + d.id);
-    toast('Fonte adicionada.');
+    toast(cards.length ? 'Fonte adicionada.' : 'Link salvo, mas as cartas NÃO foram lidas. Ela não entra na comparação até você colar a lista.');
     if (names.length) refreshPrices({ only: names, silent: true });
   }
 
@@ -1662,8 +1700,12 @@
   function submitText() {
     readDraftInputs();
     var s = FU.splitSource(draft.text);
-    draft.url = s.url; draft.label = s.label; draft.kind = s.url ? 'link' : 'text';
-    if (!s.url && !s.list.trim()) {
+    var fillS = draft.fillId ? (deckById(draft.deckId).sources || []).filter(function (x) { return x.id === draft.fillId; })[0] : null;
+    if (fillS) {
+      draft.url = fillS.url || ''; draft.label = fillS.label || ''; draft.kind = fillS.kind || 'link';
+      if (!s.list.trim()) { draft.err = 'Não encontrei cartas. Cole o texto das cartas, uma por linha, ex.: 4 Counterspell.'; render(); keepFocus('#st'); return; }
+    } else { draft.url = s.url; draft.label = s.label; draft.kind = s.url ? 'link' : 'text'; }
+    if (!fillS && !s.url && !s.list.trim()) {
       draft.err = draft.text.trim() ? 'Não encontrei link nem cartas. Use uma carta por linha, ex.: 4 Counterspell.' : 'Cole um link ou uma lista primeiro.';
       render(); keepFocus('#st'); return;
     }
@@ -2401,33 +2443,35 @@
       '<label for="acIn" class="visually-hidden">Buscar carta para adicionar</label>' +
       '<div class="acrow"><input type="text" id="acIn" data-acdeck="' + id + '" data-acmode="consider" autocomplete="off" spellcheck="false" autocapitalize="off" enterkeyhint="search" placeholder="Buscar carta (inglês ou português)" aria-describedby="acHelp" aria-controls="acList">' +
       '<button type="button" class="btn primary" data-acgo>' + ICON.plus + 'Adicionar</button></div>' +
-      '<p class="xs muted" id="acHelp">Entra 1 cópia aqui. Para pôr direto no deck, use “No deck” na carta.</p>' +
+      '<p class="xs muted" id="acHelp">Entra 1 cópia aqui. Para pôr direto no deck, toque no ⋯ da carta e escolha “Pôr no deck”.</p>' +
       '<p class="visually-hidden" id="acLive" aria-live="polite"></p><ul class="aclist" id="acList"></ul>';
     if (list.length) {
-      h += '<ul class="cons-list">' + list.map(function (c, i) {
+      h += '<ul class="rows cons-rows">' + list.map(function (c, i) {
         var have = Math.min(c.qty, spareQty(c.name)), info = cardInfo(c.name), pr = moneyShort(info, 1), ref = id + '|' + i + '|' + esc(c.name), nm = esc(c.name);
-        var why = c.auto && c.cnt ? 'aparece em ' + c.cnt + ' de ' + c.tot + (c.tot === 1 ? ' fonte' : ' fontes') : '';
-        return '<li class="cr"><div class="cn"><button class="nm" data-card="' + nm + '">' + c.qty + '× ' + nm + '</button>' +
-          '<span class="xs muted">' + (c.board === 'side' ? 'sideboard' : 'principal') + (why ? ' · ' + why : '') + (pr ? ' · ' + pr + ' cada' : '') + '</span>' +
-          (have && have < c.qty ? '<span class="xs muted">Tem ' + have + ' de ' + c.qty + '</span>' : '') + '</div>' +
-          '<div class="ca"><button type="button" class="btn tg" data-conshave="' + ref + '" aria-pressed="' + (have >= c.qty) + '" aria-label="Tenho ' + nm + '">' + (have >= c.qty ? '✓ ' : '') + 'Tenho</button>' +
-          '<button type="button" class="btn primary" data-consdeck="' + ref + '" aria-label="Pôr ' + nm + ' no ' + (c.board === 'side' ? 'sideboard' : 'deck') + '">No ' + (c.board === 'side' ? 'sideboard' : 'deck') + '</button>' +
-          '<button type="button" class="btn" data-consw="' + ref + '" aria-label="Trocar ' + nm + ' por uma carta do deck">Trocar</button>' +
-          '<button type="button" class="btn" data-consrm="' + ref + '" aria-label="Remover ' + nm + ' da lista">Remover</button></div></li>';
+        var why = c.auto && c.cnt ? 'aparece em ' + c.cnt + ' de ' + c.tot : '';
+        var cls = have >= c.qty ? 'done' : (have > 0 ? 'part' : 'none');
+        return '<li class="r"><span class="q' + (have >= c.qty ? '' : ' miss') + '">' + c.qty + '</span>' +
+          '<button class="nm" data-card="' + nm + '">' + esc(canonical(c.name)) + '<span class="d">' + (c.board === 'side' ? 'sideboard' : 'principal') + (why ? ' · ' + why : '') + (pr ? ' · ' + pr + ' cada' : '') + '</span></button>' +
+          rowTools(info, c.name) +
+          '<span class="ra"><button class="own ' + cls + '" data-conshave="' + ref + '" aria-pressed="' + (have >= c.qty) + '" aria-label="Tenho ' + have + ' de ' + c.qty + ' ' + nm + '. Tocar para marcar ' + (have >= c.qty ? 'nenhuma' : 'todas') + '"><i>' + (have >= c.qty ? '✓' : have + '/' + c.qty) + '</i></button>' +
+          '<button class="ib" data-consmenu="' + ref + '" aria-label="Mais ações para ' + nm + ': pôr no deck, trocar ou remover">' + svg('<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>') + '</button></span></li>';
       }).join('') + '</ul>';
       if (need) h += '<p class="small"><strong>Faltam ' + need + (need === 1 ? ' carta' : ' cartas') + '</strong>' + (val ? ' · ≈ ' + brl0.format(val) : '') + ' desta lista.</p>';
     }
+    var unreadN = (d.sources || []).filter(function (x) { return !(x.cards && x.cards.length); }).length;
+    if (unreadN) h += '<p class="small err"><strong>' + unreadN + (unreadN === 1 ? ' fonte da Pesquisa não foi lida' : ' fontes da Pesquisa não foram lidas') + '</strong> e fica de fora desta comparação. <button type="button" class="link" data-dtab="research">Colar as listas</button></p>';
     var pool = FU.considerPool(d, canonical), srcN = (d.sources || []).filter(function (x) { return x.cards && x.cards.length; }).length;
     if (!list.length) h += '<p class="small">' + (!srcN ? ((d.sources || []).length ? '<strong>As ' + d.sources.length + (d.sources.length === 1 ? ' fonte da aba Pesquisa é só um link' : ' fontes da aba Pesquisa são só links') + ', sem cartas lidas.</strong> Eu só comparo listas que tenham as cartas (texto colado ou lido de print). Adicione a lista com as cartas na aba Pesquisa.' : '<strong>Este deck não tem listas na aba Pesquisa.</strong> Junte listas lá e as cartas delas aparecem aqui. Você também pode buscar uma carta acima.')
       : (pool.length ? 'Nenhuma carta apareceu em 2 ou mais das suas ' + srcN + (srcN === 1 ? ' lista' : ' listas') + '. As que aparecem em uma só estão logo abaixo.'
         : 'Todas as cartas das suas ' + srcN + (srcN === 1 ? ' lista' : ' listas') + ' já estão no deck ou foram removidas daqui.')) + '</p>';
     if (pool.length) {
-      h += '<details class="small"' + (poolOpen === d.id ? ' open' : '') + ' id="consPool"><summary style="min-height:44px;display:flex;align-items:center;cursor:pointer">Outras cartas das suas listas (' + pool.length + ')</summary><ul class="cons-list">' +
+      h += '<details class="small"' + (poolOpen === d.id ? ' open' : '') + ' id="consPool"><summary style="min-height:44px;display:flex;align-items:center;cursor:pointer"><strong>Outras cartas das suas listas (' + pool.length + ')</strong></summary><ul class="rows cons-rows">' +
         pool.slice(0, 40).map(function (c) {
-          var pr = moneyShort(cardInfo(c.name), 1);
-          return '<li class="cr"><div class="cn"><button class="nm" data-card="' + esc(c.name) + '">' + c.qty + '× ' + esc(c.name) + '</button>' +
-            '<span class="xs muted">' + (c.board === 'side' ? 'sideboard' : 'principal') + ' · aparece em ' + c.count + ' de ' + c.total + (c.total === 1 ? ' fonte' : ' fontes') + (pr ? ' · ' + pr + ' cada' : '') + '</span></div>' +
-            '<div class="ca"><button type="button" class="btn primary" data-conspool="' + id + '|' + esc(c.name) + '" aria-label="Adicionar ' + esc(c.name) + ' à lista Em consideração">Adicionar</button></div></li>';
+          var info = cardInfo(c.name);
+          return '<li class="r"><span class="q" aria-label="em ' + c.count + ' de ' + c.total + ' fontes" style="font-size:.8125rem;color:var(--muted)">' + c.count + '/' + c.total + '</span>' +
+            '<button class="nm" data-card="' + esc(c.name) + '">' + esc(canonical(c.name)) + '<span class="d">' + c.qty + ' cópia' + (c.qty > 1 ? 's' : '') + (c.board === 'side' ? ' · sideboard' : '') + '</span></button>' +
+            rowTools(info, c.name) +
+            '<span class="ra"><button class="own" data-conspool="' + id + '|' + esc(c.name) + '" aria-label="Adicionar ' + esc(canonical(c.name)) + ' à lista Em consideração"><i style="border-color:var(--accent);color:var(--accent)">+</i></button></span></li>';
         }).join('') + '</ul>' + (pool.length > 40 ? '<p class="xs muted">Mostrando as 40 que aparecem em mais listas.</p>' : '') + '</details>';
     }
     return h + '</section>';
@@ -2436,6 +2480,27 @@
   function consEntry(d, idx, name) {
     var e = d && (d.consider || [])[idx];
     return e && FU.key(e.name) === FU.key(name) ? e : null;
+  }
+  function consToDeck(dd, idx, name) {
+    var de = consEntry(dd, idx, name); if (!de) return null;
+    var dn = de.name, dq = de.qty, db2 = de.board === 'side' ? 'side' : 'main';
+    var dx = dd.cards.filter(function (x) { return x.board === db2 && FU.key(canonical(x.name)) === FU.key(canonical(dn)); })[0];
+    if (dx) setQty(dx, dx.qty + dq); else addToDeck(dd, dn, dq, db2);
+    dd.consider.splice(idx, 1); if (!dd.consider.length) delete dd.consider;
+    return { name: dn, board: db2 };
+  }
+  function consDrop(rd, idx, name) {
+    var re = consEntry(rd, idx, name); if (!re) return null;
+    rd.consider.splice(idx, 1); if (!rd.consider.length) delete rd.consider;
+    rd.consNo = (rd.consNo || []).concat([re.name]).slice(-200);
+    return re;
+  }
+  function considerActionSheet(d, e, ref) {
+    var nm = esc(e.name), bd = e.board === 'side' ? 'sideboard' : 'deck';
+    return '<h2 id="sheetTitle">' + e.qty + '× ' + nm + '</h2><ul class="menu">' +
+      '<li><button type="button" data-cadeck><span>Pôr no ' + bd + '<small>Entra no deck e sai desta lista</small></span></button></li>' +
+      '<li><button type="button" data-caswap><span>Trocar por uma carta do deck<small>A que sair vai para esta lista</small></span></button></li>' +
+      '<li><button type="button" data-carm><span>Remover da lista<small>Não volta a ser sugerida</small></span></button></li></ul>';
   }
   function considerSwapSheet(d, e) {
     var rows = ['main', 'side'].map(function (b) {
@@ -2692,12 +2757,7 @@
       copyText(FU.toLigaMagic(missingAgg(bscope)), 'Copiado. Cole no "Comprar por lista" da Liga Magic.');
       return;
     }
-    if (t.hasAttribute('data-consw')) { openSheet('swap', t.getAttribute('data-consw'), t); return; }
-    if (t.hasAttribute('data-consrm')) {
-      var rv = t.getAttribute('data-consrm').split('|'), rd = deckById(rv[0]), re = consEntry(rd, +rv[1], rv.slice(2).join('|'));
-      if (re) { rd.consider.splice(+rv[1], 1); if (!rd.consider.length) delete rd.consider; rd.consNo = (rd.consNo || []).concat([re.name]).slice(-200); persist(true); var yr = window.scrollY; render(); window.scrollTo(0, yr); toast('Tirei ' + re.name + ' da lista.'); var fr = document.getElementById('csH'); if (fr) fr.focus({ preventScroll: true }); }
-      return;
-    }
+    if (t.hasAttribute('data-consmenu')) { openSheet('consact', t.getAttribute('data-consmenu'), t); return; }
     if (t.hasAttribute('data-conspool')) {
       var pv = t.getAttribute('data-conspool').split('|'), pd = deckById(pv[0]), pn = pv.slice(1).join('|');
       var pc = pd && FU.considerPool(pd, canonical).filter(function (x) { return FU.key(x.name) === FU.key(pn); })[0];
@@ -2717,19 +2777,6 @@
         persist(true); var yh = window.scrollY; render(); window.scrollTo(0, yh);
         keepFocus('[data-conshave^="' + keepFocusSafe(hv[0]) + '|' + hv[1] + '|"]');
         toast(hh >= he.qty ? 'Desmarquei ' + he.name + '.' : 'Marquei que você tem ' + he.name + '.');
-      }
-      return;
-    }
-    if (t.hasAttribute('data-consdeck')) {
-      var dv = t.getAttribute('data-consdeck').split('|'), dd = deckById(dv[0]), de = consEntry(dd, +dv[1], dv.slice(2).join('|'));
-      if (de) {
-        var dn = de.name, dq = de.qty, db2 = de.board === 'side' ? 'side' : 'main';
-        var dx = dd.cards.filter(function (x) { return x.board === db2 && FU.key(canonical(x.name)) === FU.key(canonical(dn)); })[0];
-        if (dx) setQty(dx, dx.qty + dq); else addToDeck(dd, dn, dq, db2);
-        dd.consider.splice(+dv[1], 1); if (!dd.consider.length) delete dd.consider;
-        persist(true); var yd = window.scrollY; render(); window.scrollTo(0, yd);
-        toast(dn + ' entrou no ' + (db2 === 'side' ? 'sideboard' : 'deck') + '.');
-        var fd = document.getElementById('csH'); if (fd) fd.focus({ preventScroll: true });
       }
       return;
     }
