@@ -91,8 +91,9 @@
         if (!miss) return;
         var nm = canonical ? canonical(c.name) : c.name;
         var k = key(nm);
-        if (!map[k]) { map[k] = { name: nm, total: 0, decks: [] }; order.push(k); }
+        if (!map[k]) { map[k] = { name: nm, total: 0, maybe: 0, decks: [] }; order.push(k); }
         map[k].total += miss;
+        if (c.board === 'maybe') map[k].maybe += miss;
         var existing = null;
         map[k].decks.forEach(function (x) { if (x.deckId === d.id) existing = x; });
         if (existing) existing.qty += miss;
@@ -758,10 +759,43 @@
     ].join('\n\n');
   }
 
+  /* "Em consideração": cartas que talvez entrem no deck. Ficam em d.consider ({name, qty, board}), separadas de d.cards:
+     editar o deck não as apaga e elas não contam no selo "Completo" nem na porcentagem de pronto. */
+  function considerAdd(d, name, qty, board, canonical) {
+    var nm = canonical ? canonical(name) : name, k = key(nm), q = Math.max(1, Math.min(99, qty || 1)), b = board === 'side' ? 'side' : 'main';
+    d.consider = d.consider || [];
+    var ex = d.consider.filter(function (c) { return key(canonical ? canonical(c.name) : c.name) === k && c.board === b; })[0];
+    if (ex) { ex.qty = Math.min(99, ex.qty + q); return ex; }
+    ex = { name: nm, qty: q, board: b }; d.consider.push(ex); return ex;
+  }
+  function considerRemove(d, name, canonical) {
+    var k = key(canonical ? canonical(name) : name), before = (d.consider || []).length;
+    d.consider = (d.consider || []).filter(function (c) { return key(canonical ? canonical(c.name) : c.name) !== k; });
+    if (!d.consider.length) delete d.consider;
+    return before - (d.consider || []).length;
+  }
+  function considerHas(d, name, canonical) {
+    var k = key(canonical ? canonical(name) : name);
+    return (d.consider || []).some(function (c) { return key(canonical ? canonical(c.name) : c.name) === k; });
+  }
+  /* Cartas que aparecem em várias listas da aba Pesquisa e ainda não estão no deck nem na lista; "Ignorar" guarda em d.consNo. */
+  function considerSuggestions(d, canonical, limit) {
+    var inDeck = {}, no = {};
+    (d.cards || []).forEach(function (c) { inDeck[key(canonical ? canonical(c.name) : c.name)] = 1; });
+    (d.consNo || []).forEach(function (n) { no[key(n)] = 1; });
+    return consensus(d.sources || []).filter(function (c) {
+      var k = key(canonical ? canonical(c.name) : c.name);
+      return c.count >= 2 && !inDeck[k] && !no[k] && !considerHas(d, c.name, canonical);
+    }).slice(0, limit || 8);
+  }
+  function considerNeed(d, haveOf) {
+    return (d.consider || []).reduce(function (t, c) { return t + Math.max(0, c.qty - Math.min(c.qty, haveOf(c.name) || 0)); }, 0);
+  }
+
   var api = {
     META_MIN: META_MIN, META_SMALL: META_SMALL, META_STALE_DAYS: META_STALE_DAYS, META_ARCHS: META_ARCHS,
     suggestArch: suggestArch, parseMeta: parseMeta, parseMetaTable: parseMetaTable, b64urlDecode: b64urlDecode, b64urlEncode: b64urlEncode,
-    metaEntry: metaEntry, metaSplit: metaSplit, metaAgeDays: metaAgeDays, sideNote: sideNote, sideNotesFor: sideNotesFor, planList: planList, noteCardStatus: noteCardStatus, parseGuide: parseGuide, noAcc: noAcc, guideTotals: guideTotals, guidePrompt: guidePrompt,
+    metaEntry: metaEntry, metaSplit: metaSplit, metaAgeDays: metaAgeDays, sideNote: sideNote, sideNotesFor: sideNotesFor, planList: planList, noteCardStatus: noteCardStatus, parseGuide: parseGuide, noAcc: noAcc, considerAdd: considerAdd, considerRemove: considerRemove, considerHas: considerHas, considerSuggestions: considerSuggestions, considerNeed: considerNeed, guideTotals: guideTotals, guidePrompt: guidePrompt,
     parsePriceBR: parsePriceBR, parseLigaPrices: parseLigaPrices,
     edsSum: edsSum, edsMerge: edsMerge, edsTake: edsTake, edsPop: edsPop,
     splitSource: splitSource, markOwned: markOwned,

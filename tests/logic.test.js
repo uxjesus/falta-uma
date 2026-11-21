@@ -211,3 +211,37 @@ test('primer e guias sobrevivem a JSON (backup/restauração)', () => {
   const d = { primer: { lines: ['a'], src: 's', at: 1 }, mu: { Burn: { plan: { in: [{ q: 1, name: 'A' }], out: [] }, lines: [], src: [{ label: 'x' }], partial: false, unreadable: 0, at: 1 } } };
   assert.deepEqual(JSON.parse(JSON.stringify(d)), d);
 });
+
+test('aggregateMissing conta cartas "maybe" e diz quantas são em consideração', () => {
+  const decks = [{ id: 'a', name: 'A', cards: [{ name: 'Counterspell', qty: 4, owned: 2, board: 'main' }, { name: 'Powder Keg', qty: 2, owned: 0, board: 'maybe' }] },
+    { id: 'b', name: 'B', cards: [{ name: 'Powder Keg', qty: 1, owned: 0, board: 'main' }] }];
+  const r = FU.aggregateMissing(decks);
+  const keg = r.find((x) => x.name === 'Powder Keg'), cs = r.find((x) => x.name === 'Counterspell');
+  assert.equal(keg.total, 3); assert.equal(keg.maybe, 2); assert.equal(cs.maybe, 0);
+});
+
+test('considerAdd soma quantidade, separa principal e sideboard e limita a 99; considerRemove apaga o campo vazio', () => {
+  const d = { cards: [] };
+  FU.considerAdd(d, 'Powder Keg', 2, 'main'); FU.considerAdd(d, 'powder keg', 1, 'main'); FU.considerAdd(d, 'Powder Keg', 1, 'side');
+  assert.deepEqual(d.consider, [{ name: 'Powder Keg', qty: 3, board: 'main' }, { name: 'Powder Keg', qty: 1, board: 'side' }]);
+  FU.considerAdd(d, 'X', 500, 'main'); assert.equal(d.consider[2].qty, 99);
+  assert.equal(FU.considerRemove(d, 'POWDER KEG'), 2);
+  FU.considerRemove(d, 'X'); assert.equal(d.consider, undefined);
+});
+
+test('considerSuggestions: só cartas em 2+ fontes, fora do deck, da lista e das ignoradas', () => {
+  const src = (cards) => ({ cards: cards.map(([name, qty, board]) => ({ name, qty, board: board || 'main' })) });
+  const d = { cards: [{ name: 'Counterspell', qty: 4, board: 'main' }], sources: [
+    src([['Counterspell', 4], ['Powder Keg', 2, 'side'], ['Exalted Angel', 2], ['Annul', 1]]),
+    src([['Counterspell', 4], ['Powder Keg', 2, 'side'], ['Exalted Angel', 3], ['Disenchant', 1]]),
+    src([['Powder Keg', 1, 'side'], ['Annul', 1]])], consider: [{ name: 'Annul', qty: 1, board: 'main' }], consNo: ['exalted angel'] };
+  const s = FU.considerSuggestions(d);
+  assert.deepEqual(s.map((x) => x.name), ['Powder Keg']);
+  assert.equal(s[0].count, 3); assert.equal(s[0].total, 3); assert.equal(s[0].board, 'side');
+  assert.deepEqual(FU.considerSuggestions({ cards: [], sources: [src([['A', 1]])] }), []);
+});
+
+test('considerNeed soma só o que falta, descontando o que a pessoa tem solto', () => {
+  const d = { consider: [{ name: 'A', qty: 2 }, { name: 'B', qty: 1 }] };
+  assert.equal(FU.considerNeed(d, (n) => (n === 'A' ? 1 : 5)), 1);
+});

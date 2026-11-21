@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.27.0';
+  var APP_VERSION = '0.28.0';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -369,6 +369,15 @@
     s[k].qty -= got; s[k].eds = pop.kept;
     if (s[k].qty <= 0) delete s[k];
     return { n: got, eds: pop.removed };
+  }
+  /* "Em consideração" entra na conta do que falta como carta "maybe": ter = cópias soltas na coleção. */
+  function consCards(d) {
+    return (d.format === 'Lista' ? [] : d.consider || []).map(function (c) { return { name: c.name, qty: c.qty, board: 'maybe', owned: Math.min(c.qty, spareQty(c.name)) }; });
+  }
+  function missingAgg(decks) {
+    return FU.aggregateMissing((decks || []).map(function (d) {
+      return d && d.format !== 'Lista' && d.consider && d.consider.length ? { id: d.id, name: d.name, format: d.format, cards: d.cards.concat(consCards(d)) } : d;
+    }), canonical);
   }
   function takeSpare(name, want) { return takeSpareEds(name, want).n; }
   function spareQty(name) { var s = spareMap()[FU.key(canonical(name))]; return s ? s.qty : 0; }
@@ -940,7 +949,7 @@
       }
       html += segRow('Ordenar por', 'sort', [['name', 'Nome'], ['price', 'Preço'], ['cmc', 'Custo']], ui.sort);
     } else if (type === 'export') {
-      var miss = ctx === 'falta' ? FU.aggregateMissing(scopeDecks(), canonical) : FU.aggregateMissing([deckById(ctx)], canonical);
+      var miss = ctx === 'falta' ? missingAgg(scopeDecks()) : missingAgg([deckById(ctx)]);
       html = '<h2 id="sheetTitle">Exportar</h2><ul class="menu">' +
         '<li><button data-exp="liga"' + (miss.length ? '' : ' disabled') + '>' + svg('<path d="M6 6h15l-1.5 9h-12z"/><path d="M6 6 5 3H2"/><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/>') + '<span>Copiar o que falta para a Liga Magic<small>Formato do "Comprar por lista"</small></span></button></li>' +
         '<li><button data-exp="share"' + (miss.length ? '' : ' disabled') + '>' + ICON.share + '<span>Compartilhar o que falta<small>WhatsApp e outros apps</small></span></button></li>' +
@@ -952,6 +961,7 @@
         '<label for="ownIn" class="visually-hidden">Cartas que eu tenho</label><textarea id="ownIn" aria-describedby="ownh" spellcheck="false" autocapitalize="off" style="min-height:180px;margin-top:12px"></textarea>' +
         '<button class="btn primary full" data-ownapply style="margin-top:12px">Marcar no deck</button>';
     }
+    else if (type === 'swap') { var sw = String(ctx).split('|'), sd = deckById(sw[0]), se = consEntry(sd, +sw[1], sw.slice(2).join('|')); html = se ? considerSwapSheet(sd, se) : '<p>Carta não encontrada.</p>'; }
     else if (type === 'guide') { guideDraft = null; var gd = deckById(ctx); html = gd ? guideInputHtml(gd) : '<p>Deck não encontrado.</p>'; }
     sheetBody.innerHTML = html;
     if (!sheet.open) sheet.showModal();
@@ -960,6 +970,19 @@
     var t = e.target.closest('button');
     if (!t || !sheetCtx) return;
     var ctx = sheetCtx.ctx;
+    if (sheetCtx.type === 'swap') {
+      if (!t.hasAttribute('data-swout')) return;
+      var sp = String(ctx).split('|'), sdk = deckById(sp[0]);
+      if (!sdk) return;
+      if (!consEntry(sdk, +sp[1], sp.slice(2).join('|'))) { toast('A lista mudou. Abra a troca de novo.'); sheet.close(); return; }
+      var res = considerSwap(sdk, +sp[1], +t.getAttribute('data-swout'));
+      if (!res) { toast('Não consegui trocar.'); return; }
+      persist(true); sheet.close();
+      var yw = window.scrollY; render(); window.scrollTo(0, yw);
+      var fw = document.getElementById('csH'); if (fw) fw.focus({ preventScroll: true });
+      toast('Entrou ' + res.inName + ', saiu ' + res.outName + '. A que saiu está em Em consideração.');
+      return;
+    }
     if (sheetCtx.type === 'guide') {
       var gdk = deckById(ctx);
       if (!gdk) return;
@@ -1017,7 +1040,7 @@
       return;
     }
     var scope = ctx === 'falta' ? (scopeDecks()) : [deckById(ctx)];
-    var txt = FU.toLigaMagic(FU.aggregateMissing(scope, canonical));
+    var txt = FU.toLigaMagic(missingAgg(scope));
     var x = t.getAttribute('data-exp');
     if (x === 'liga') { copyText(txt, 'Copiado. Cole no "Comprar por lista" da Liga Magic.'); sheet.close(); }
     else if (x === 'share') { sheet.close(); shareText('O que me falta', 'Preciso destas cartas:\n' + txt); }
@@ -1087,7 +1110,7 @@
   function viewFalta() {
     var ui = state.ui;
     if (ui.deck !== 'all' && !deckById(ui.deck)) ui.deck = 'all';
-    var items = FU.aggregateMissing(scopeDecks(), canonical);
+    var items = missingAgg(scopeDecks());
     var totalCards = 0, totalBrl = 0;
     items.forEach(function (i) {
       totalCards += i.total;
@@ -1125,9 +1148,9 @@
         html += '<ul class="grid">' + g.items.map(function (i) {
           var info = cardInfo(i.name);
           var pr = moneyShort(info, 1);
-          return '<li><button class="gc" data-card="' + esc(i.name) + '" aria-label="Faltam ' + i.total + ' ' + esc(i.name) + (pr ? ', ' + pr + ' cada' : '') + '">' +
+          return '<li><button class="gc" data-card="' + esc(i.name) + '" aria-label="Faltam ' + i.total + ' ' + esc(i.name) + (i.maybe ? ', ' + (i.maybe === i.total ? 'em consideração' : i.maybe + ' em consideração') : '') + (pr ? ', ' + pr + ' cada' : '') + '">' +
             (imgOf(info) ? '<img src="' + esc(imgOf(info)) + '" alt="" loading="lazy" decoding="async" width="488" height="680">' : '<span class="ph" style="' + phStyle(info) + '">' + esc(i.name) + '</span>') +
-            '<span class="cap" aria-hidden="true"><span class="m">falta ' + i.total + '</span><span>' + (pr || '—') + '</span></span></button></li>';
+            '<span class="cap" aria-hidden="true"><span class="m">falta ' + i.total + (i.maybe ? ' · talvez' : '') + '</span><span>' + (pr || '—') + '</span></span></button></li>';
         }).join('') + '</ul></section>';
         return;
       }
@@ -1135,13 +1158,13 @@
       g.items.forEach(function (i) {
         var info = cardInfo(i.name);
         html += '<li class="r"><span class="q miss" aria-label="faltam ' + i.total + '">' + i.total + '</span>' +
-          '<button class="nm" data-card="' + esc(i.name) + '">' + esc(i.name) +
+          '<button class="nm" data-card="' + esc(i.name) + '">' + esc(i.name) + (i.maybe ? '<span class="d">' + (i.maybe === i.total ? 'em consideração' : i.maybe + ' em consideração') + '</span>' : '') +
           (state.decks.length > 1 && ui.deck === 'all' ? '<span class="d">' + i.decks.map(function (d) { return esc(d.deckName) + (i.decks.length > 1 ? ' ' + d.qty : ''); }).join(' · ') + '</span>' : '') + '</button>' +
           rowTools(info, i.name) + priceCell(info, i.total) + '</li>';
       });
       html += '</ul></section>';
     });
-    return html + addCardHtml({ id: SOLTAS_ID }, true) + '<p class="foot">Terrenos básicos não entram. Preço: o que você anotou da Liga Magic ou a edição mais barata no Scryfall, convertida para real.</p>';
+    return html + addCardHtml({ id: SOLTAS_ID }, true) + '<p class="foot">Terrenos básicos não entram. “Talvez” e “em consideração” são cartas da lista Em consideração de um deck. Preço: o que você anotou da Liga Magic ou a edição mais barata no Scryfall, convertida para real.</p>';
   }
 
   function viewDeck(id) {
@@ -1186,7 +1209,7 @@
       toolBtn('data-sheet="owned" data-ctx="' + esc(d.id) + '"', svg('<path d="M9 11l3 3 8-8"/><path d="M20 12v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h11"/>'), 'Marcar o que eu tenho colando uma lista'),
       toolBtn('data-photo="' + esc(d.id) + '"', ICO.cam, 'Importar por foto'),
       toolBtn('data-guide="' + esc(d.id) + '"', svg('<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5"/>'), 'Importar guia ou como jogar, pela sua IA'),
-      toolBtn('data-buy="' + esc(d.id) + '"' + (miss ? '' : ' disabled'), svg('<path d="M6 6h15l-1.5 9h-12z"/><path d="M6 6 5 3H2"/><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/>'), 'Comprar: copiar o que falta para a Liga Magic')
+      toolBtn('data-buy="' + esc(d.id) + '"' + (miss || consNeedOf(d) ? '' : ' disabled'), svg('<path d="M6 6h15l-1.5 9h-12z"/><path d="M6 6 5 3H2"/><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/>'), 'Comprar: copiar o que falta para a Liga Magic')
     ], d.id, '<a class="ib" href="#/editar/' + esc(d.id) + '" aria-label="Editar deck" title="Editar deck" style="color:var(--accent)">' + ICON.edit + '</a>');
     if (onlyMiss) html += '<p class="chipline"><span>Mostrando só o que falta</span><button class="link" data-clearmiss>Mostrar todas</button></p>';
 
@@ -1210,6 +1233,7 @@
       html += '<section class="sec">' + secHead(bk, 'Terrenos básicos', basics.reduce(function (s, c) { return s + c.qty; }, 0), '<span class="sum">não contam</span>') +
         (isClosed(bk) ? '' : '<ul class="rows">' + basics.map(function (c) { return '<li class="r"><span class="q">' + c.qty + '</span><span class="nm" style="cursor:default">' + esc(c.name) + (c.board === 'side' ? ' (side)' : '') + '</span><span></span><span></span></li>'; }).join('') + '</ul>') + '</section>';
     }
+    html += considerHtml(d);
     html += matchupCard(d);
     html += addCardHtml(d);
     html += '<p class="foot">' + (view === 'list' ? 'Toque no marcador à direita para dizer que tem todas (ou nenhuma). ' : '') + 'Toque numa carta para mudar a quantidade, mover para o sideboard, tirar do deck ou ajustar quantas você tem.</p>';
@@ -1233,7 +1257,9 @@
       ? 'A carta vai para a lista “Soltas” e entra em “O que falta”. Depois você pode movê-la para um deck.'
       : (kind === 'colecao' ? 'Marca 1 cópia como sua, fora de qualquer deck. Para várias de uma vez, importe uma foto.'
         : 'Entra 1 cópia no principal. Depois toque na carta para ajustar.');
-    return '<section class="sec addcard" aria-labelledby="acL"><h2 class="sec-h" id="acL">' + title + '</h2><div class="form" style="padding-top:8px;gap:8px">' +
+    var seg = !kind && d.format !== 'Lista' ? '<div class="seg2" role="group" aria-label="Adicionar a"><button type="button" data-addto="deck" aria-pressed="' + (addTarget === 'deck') + '">No deck</button><button type="button" data-addto="consider" aria-pressed="' + (addTarget === 'consider') + '">Em consideração</button></div>' : '';
+    if (seg && addTarget === 'consider') help = 'Entra 1 cópia na lista Em consideração. Ela conta em “O que me falta”, mas não no selo “Completo”.';
+    return '<section class="sec addcard" aria-labelledby="acL"><h2 class="sec-h" id="acL">' + title + '</h2><div class="form" style="padding-top:8px;gap:8px">' + seg +
       '<label for="acIn" class="visually-hidden">Nome da carta</label>' +
       '<div class="acrow"><input type="text" id="acIn" data-acdeck="' + esc(d.id) + '" autocomplete="off" spellcheck="false" autocapitalize="off" enterkeyhint="search" placeholder="Nome da carta (inglês ou português)" aria-describedby="acHelp" aria-controls="acList">' +
       '<button type="button" class="btn primary" data-acgo>' + ICON.plus + 'Adicionar</button></div>' +
@@ -1332,6 +1358,17 @@
     var d = loose ? soltasDeck(true) : deckById(did);
     if (!d) return;
     var nm = canonical(name);
+    if (!loose && addTarget === 'consider' && d.format !== 'Lista') {
+      if (d.cards.some(function (c) { return FU.key(canonical(c.name)) === FU.key(nm); })) { toast('Já está no deck. Para mudar a quantidade, toque na carta.'); return; }
+      FU.considerAdd(d, nm, 1, 'main', canonical);
+      persist(true);
+      var yq = window.scrollY; render(); window.scrollTo(0, yq);
+      var aq = document.getElementById('acIn'); if (aq) aq.focus({ preventScroll: true });
+      toast('Em consideração: ' + nm + '.');
+      var iq = cardInfo(nm);
+      if (!iq || !iq.typeLine) refreshPrices({ only: [nm], silent: true });
+      return;
+    }
     var ex = d.cards.filter(function (c) { return c.board === 'main' && FU.key(canonical(c.name)) === FU.key(nm); })[0];
     if (ex && !loose) { toast('Já está no deck. Toque na carta para mudar a quantidade.'); return; }
     var msg;
@@ -2334,6 +2371,66 @@
     return h;
   }
 
+
+  /* ---------- Em consideração: cartas que talvez entrem no deck ---------- */
+  var addTarget = 'deck';
+  function consNeedOf(d) { return FU.considerNeed(d, spareQty); }
+  function considerHtml(d) {
+    if (d.format === 'Lista') return '';
+    var list = d.consider || [], sug = FU.considerSuggestions(d, canonical, 8), id = esc(d.id);
+    var need = consNeedOf(d), val = 0;
+    list.forEach(function (c) { var b = unitBrl(cardInfo(c.name)); if (b != null) val += b * Math.max(0, c.qty - Math.min(c.qty, spareQty(c.name))); });
+    var h = '<section class="card pad stack cons" aria-labelledby="csH" style="margin:16px"><h2 id="csH" tabindex="-1" style="font-size:1.0625rem">Em consideração' + (list.length ? ' <span class="muted">(' + list.length + ')</span>' : '') + '</h2>' +
+      '<p class="small muted">Cartas que talvez entrem. Contam em “O que me falta” e no preço, mas não no selo “Completo” nem na porcentagem de pronto.</p>';
+    if (list.length) {
+      h += '<ul class="cons-list">' + list.map(function (c, i) {
+        var have = Math.min(c.qty, spareQty(c.name)), info = cardInfo(c.name), pr = moneyShort(info, 1);
+        return '<li class="cr"><div class="cn"><button class="nm" data-card="' + esc(c.name) + '">' + c.qty + '× ' + esc(c.name) + '</button>' +
+          '<span class="xs muted">' + (c.board === 'side' ? 'sideboard' : 'principal') + (pr ? ' · ' + pr + ' cada' : '') + '</span> ' +
+          chip(have >= c.qty ? 'ok' : (have ? 'mid' : 'no'), have >= c.qty ? 'Você tem' : (have ? 'Tem ' + have + ' de ' + c.qty : 'Ainda não tem')) + '</div>' +
+          '<div class="ca"><button type="button" class="btn" data-consw="' + id + '|' + i + '|' + esc(c.name) + '" aria-label="Trocar ' + esc(c.name) + '">Trocar</button>' +
+          '<button type="button" class="btn" data-consrm="' + id + '|' + i + '|' + esc(c.name) + '" aria-label="Remover ' + esc(c.name) + ' da lista">Remover</button></div></li>';
+      }).join('') + '</ul>';
+      if (need) h += '<p class="small"><strong>Faltam ' + need + (need === 1 ? ' carta' : ' cartas') + '</strong>' + (val ? ' · ≈ ' + brl0.format(val) : '') + ' desta lista.</p>';
+    } else h += '<p class="small">Nenhuma carta aqui ainda.</p>';
+    if (sug.length) {
+      h += '<h3 class="small" style="margin-top:4px"><strong>Sugeridas pelas suas listas</strong></h3><ul class="cons-list">' + sug.map(function (c) {
+        return '<li class="cr"><div class="cn"><button class="nm" data-card="' + esc(c.name) + '">' + c.qty + '× ' + esc(c.name) + '</button>' +
+          '<span class="xs muted">aparece em ' + c.count + ' de ' + c.total + (c.total === 1 ? ' fonte' : ' fontes') + (c.board === 'side' ? ' · no sideboard' : '') + '</span></div>' +
+          '<div class="ca"><button type="button" class="btn primary" data-consadd="' + id + '|' + esc(c.name) + '" aria-label="Adicionar ' + esc(c.name) + ' à lista">Adicionar</button>' +
+          '<button type="button" class="btn" data-consno="' + id + '|' + esc(c.name) + '" aria-label="Ignorar ' + esc(c.name) + '">Ignorar</button></div></li>';
+      }).join('') + '</ul>' + (sug.length > 1 ? '<button type="button" class="btn full" data-consall="' + id + '">Adicionar todas as sugeridas (' + sug.length + ')</button>' : '');
+    } else if ((d.sources || []).length < 2) h += '<p class="xs muted">Junte pelo menos 2 listas na aba Pesquisa e eu sugiro as cartas que se repetem.</p>';
+    return h + '<button type="button" class="btn full" data-consfocus>' + ICON.plus + 'Adicionar uma carta à lista</button></section>';
+  }
+  /* Acha a carta da lista pelo índice E pelo nome: se a lista mudou desde que a tela foi desenhada, não age na carta errada. */
+  function consEntry(d, idx, name) {
+    var e = d && (d.consider || [])[idx];
+    return e && FU.key(e.name) === FU.key(name) ? e : null;
+  }
+  function considerSwapSheet(d, e) {
+    var rows = ['main', 'side'].map(function (b) {
+      var cs = d.cards.map(function (c, i) { return { c: c, i: i }; }).filter(function (x) { return x.c.board === b && !FU.isBasic(x.c.name) && FU.key(canonical(x.c.name)) !== FU.key(canonical(e.name)); });
+      if (!cs.length) return '';
+      cs.sort(function (a, z) { return a.c.name.localeCompare(z.c.name); });
+      return '<p class="small" style="margin-top:8px"><strong>' + (b === 'side' ? 'Sideboard' : 'Principal') + '</strong></p><ul class="menu">' + cs.map(function (x) {
+        return '<li><button type="button" data-swout="' + x.i + '"><span>' + x.c.qty + '× ' + esc(x.c.name) + '<small>Sai ' + Math.min(e.qty, x.c.qty) + (Math.min(e.qty, x.c.qty) === 1 ? ' cópia' : ' cópias') + ', entra ' + esc(e.name) + '</small></span></button></li>';
+      }).join('') + '</ul>';
+    }).join('');
+    return '<h2 id="sheetTitle">Trocar ' + esc(e.name) + '</h2><p class="small muted">Escolha a carta do deck que sai. Ela vai para “Em consideração”, então dá para desfazer trocando de volta.</p>' + (rows || '<p class="small">O deck não tem cartas para trocar.</p>');
+  }
+  function considerSwap(d, ci, cardIdx) {
+    var e = (d.consider || [])[ci], c = d.cards[cardIdx];
+    if (!e || !c || c.board === 'commander' || FU.key(canonical(c.name)) === FU.key(canonical(e.name))) return null;
+    var k = Math.min(e.qty, c.qty), inName = e.name, outName = c.name, board = c.board;
+    var ex = d.cards.filter(function (x) { return x !== c && x.board === board && FU.key(canonical(x.name)) === FU.key(canonical(inName)); })[0];
+    if (ex) setQty(ex, ex.qty + k); else addToDeck(d, inName, k, board);
+    if (k >= c.qty) removeCard(d, d.cards.indexOf(c)); else setQty(c, c.qty - k);
+    if (e.qty > k) e.qty -= k; else d.consider.splice(ci, 1);
+    FU.considerAdd(d, outName, k, board, canonical);
+    return { k: k, inName: inName, outName: outName };
+  }
+
   /* ---------- "Como jogar" (primer) e importação de guias pela IA da pessoa ---------- */
   function primerHtml(d) {
     if (d.format === 'Lista') return '';
@@ -2501,6 +2598,7 @@
   }
   function onRoute() {
     var key = location.hash;
+    if (key !== lastRoute) addTarget = 'deck';
     trackNav();
     render();
     if (key !== lastRoute) { window.scrollTo(0, 0); main.focus({ preventScroll: true }); }
@@ -2563,7 +2661,50 @@
     if (t.hasAttribute('data-buy')) {
       var bc = t.getAttribute('data-buy');
       var bscope = bc === 'falta' ? (scopeDecks()) : [deckById(bc)];
-      copyText(FU.toLigaMagic(FU.aggregateMissing(bscope, canonical)), 'Copiado. Cole no "Comprar por lista" da Liga Magic.');
+      copyText(FU.toLigaMagic(missingAgg(bscope)), 'Copiado. Cole no "Comprar por lista" da Liga Magic.');
+      return;
+    }
+    if (t.hasAttribute('data-addto')) {
+      addTarget = t.getAttribute('data-addto') === 'consider' ? 'consider' : 'deck';
+      [].forEach.call(document.querySelectorAll('[data-addto]'), function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-addto') === addTarget)); });
+      var hp = document.getElementById('acHelp'); if (hp) hp.textContent = addTarget === 'consider' ? 'Entra 1 cópia na lista Em consideração. Ela conta em “O que me falta”, mas não no selo “Completo”.' : 'Entra 1 cópia no principal. Depois toque na carta para ajustar.';
+      return;
+    }
+    if (t.hasAttribute('data-consfocus')) {
+      addTarget = 'consider';
+      [].forEach.call(document.querySelectorAll('[data-addto]'), function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-addto') === 'consider')); });
+      var hq = document.getElementById('acHelp'); if (hq) hq.textContent = 'Entra 1 cópia na lista Em consideração. Ela conta em “O que me falta”, mas não no selo “Completo”.';
+      var ai = document.getElementById('acIn'); if (ai) { ai.scrollIntoView({ block: 'center' }); ai.focus(); }
+      return;
+    }
+    if (t.hasAttribute('data-consw')) { openSheet('swap', t.getAttribute('data-consw'), t); return; }
+    if (t.hasAttribute('data-consrm')) {
+      var rv = t.getAttribute('data-consrm').split('|'), rd = deckById(rv[0]), re = consEntry(rd, +rv[1], rv.slice(2).join('|'));
+      if (re) { rd.consider.splice(+rv[1], 1); if (!rd.consider.length) delete rd.consider; persist(true); var yr = window.scrollY; render(); window.scrollTo(0, yr); toast('Tirei ' + re.name + ' da lista.'); var fr = document.getElementById('csH'); if (fr) fr.focus({ preventScroll: true }); }
+      return;
+    }
+    if (t.hasAttribute('data-consadd') || t.hasAttribute('data-consno')) {
+      var cv = (t.getAttribute('data-consadd') || t.getAttribute('data-consno')).split('|'), cd = deckById(cv[0]), cname = cv.slice(1).join('|');
+      if (!cd) return;
+      var cs = FU.considerSuggestions(cd, canonical, 50).filter(function (x) { return FU.key(x.name) === FU.key(cname); })[0];
+      if (!cs) return;
+      if (t.hasAttribute('data-consadd')) { FU.considerAdd(cd, cs.name, cs.qty, cs.board, canonical); toast('Em consideração: ' + cs.name + '.'); }
+      else { cd.consNo = (cd.consNo || []).concat([cs.name]).slice(-200); toast('Ignorei ' + cs.name + '.'); }
+      persist(true); var ys2 = window.scrollY; render(); window.scrollTo(0, ys2);
+      var fs2 = document.getElementById('csH'); if (fs2) fs2.focus({ preventScroll: true });
+      var ci2 = cardInfo(cs.name); if (t.hasAttribute('data-consadd') && (!ci2 || !ci2.typeLine)) refreshPrices({ only: [cs.name], silent: true });
+      return;
+    }
+    if (t.hasAttribute('data-consall')) {
+      var ad = deckById(t.getAttribute('data-consall'));
+      if (!ad) return;
+      var all = FU.considerSuggestions(ad, canonical, 8);
+      all.forEach(function (x) { FU.considerAdd(ad, x.name, x.qty, x.board, canonical); });
+      persist(true); var ya = window.scrollY; render(); window.scrollTo(0, ya);
+      toast(all.length + (all.length === 1 ? ' carta entrou' : ' cartas entraram') + ' em Em consideração.');
+      var fa = document.getElementById('csH'); if (fa) fa.focus({ preventScroll: true });
+      var fresh2 = all.map(function (x) { return x.name; }).filter(function (n) { var i = cardInfo(n); return !i || !i.typeLine; });
+      if (fresh2.length) refreshPrices({ only: fresh2, silent: true });
       return;
     }
     if (t.hasAttribute('data-guide')) { guideText = ''; openSheet('guide', t.getAttribute('data-guide'), t); return; }
@@ -2706,13 +2847,13 @@
     var act = t.getAttribute('data-act');
     var scope = scopeDecks();
     if (act === 'copyLiga') {
-      copyText(FU.toLigaMagic(FU.aggregateMissing(scope, canonical)), 'Lista copiada. Cole no "Comprar por lista" da Liga Magic.');
+      copyText(FU.toLigaMagic(missingAgg(scope)), 'Lista copiada. Cole no "Comprar por lista" da Liga Magic.');
     } else if (act === 'shareMissing') {
-      shareText('O que me falta', 'Preciso destas cartas:\n' + FU.toLigaMagic(FU.aggregateMissing(scope, canonical)));
+      shareText('O que me falta', 'Preciso destas cartas:\n' + FU.toLigaMagic(missingAgg(scope)));
     } else if (act === 'refresh') {
       refreshPrices();
     } else if (act === 'copyDeckMissing') {
-      copyText(FU.toLigaMagic(FU.aggregateMissing([deckById(t.getAttribute('data-id'))], canonical)), 'O que falta neste deck foi copiado.');
+      copyText(FU.toLigaMagic(missingAgg([deckById(t.getAttribute('data-id'))])), 'O que falta neste deck foi copiado.');
     } else if (act === 'deleteDeck') {
       var id = t.getAttribute('data-id');
       var deck = deckById(id);
