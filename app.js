@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.31.1';
+  var APP_VERSION = '0.32.0';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -1449,14 +1449,54 @@
       '<p class="small"><strong>' + cv.have + ' de ' + cv.total + '</strong> cartas com preço da Liga' + (cv.last ? ' · último em ' + esc(fmtDate(cv.last)) : '') + '</p>' +
       '<a class="btn primary full" href="#/precos">Importar preços por print</a></section>';
   }
+  /* Atualizar tudo: preços e cartas, winrates e backup na nuvem, em sequência. Cada etapa diz se deu certo. */
+  var updBusy = false, updReport = null;
+  function updAll() {
+    if (updBusy) return;
+    if (!navigator.onLine) { updReport = { rows: [{ ok: false, t: 'Sem internet. Nada foi atualizado; seus dados salvos continuam valendo.' }] }; render(); return; }
+    updBusy = true; updReport = { rows: [], running: true }; render();
+    var rows = updReport.rows, before = db.updatedAt || 0, hasCards = allNames().length > 0;
+    function step() { render(); }
+    refreshPrices({ silent: true }).then(function () {
+      if (!hasCards) rows.push({ ok: null, t: 'Ainda não há cartas nos decks para atualizar preços.' });
+      else rows.push((db.updatedAt || 0) > before ? { ok: true, t: 'preços e dados das cartas.' } : { ok: false, t: 'não consegui falar com o Scryfall. Mantive os preços salvos.' });
+      step();
+      return metaFetch(true);
+    }).then(function (okMeta) {
+      rows.push(okMeta ? { ok: true, t: 'winrates dos confrontos.' } : { ok: false, t: 'não consegui os winrates do servidor. Mantive os que você já tem.' });
+      step();
+      var sy = loadSync(), atBefore = sy.at;
+      if (!sy.key) { rows.push({ ok: null, t: 'o backup automático não está ativado. Use o backup manual, mais abaixo.' }); return null; }
+      if (!state.decks.length) { rows.push({ ok: null, t: 'não há decks para salvar na nuvem.' }); return null; }
+      return pushSync(false).then(function () {
+        var sy2 = loadSync();
+        rows.push(sy2.at && sy2.at !== atBefore ? { ok: true, t: 'backup salvo na nuvem em ' + hhmm(sy2.at) + '.' } : { ok: false, t: 'não consegui salvar o backup na nuvem agora.' });
+      });
+    }).then(function () {
+      var cv = ligaCoverage();
+      if (cv.total && cv.have < cv.total) rows.push({ ok: null, t: 'preços da Liga em ' + cv.have + ' de ' + cv.total + ' cartas. Esses precisam de print, não dá para baixar sozinho.', link: '#/precos' });
+      else if (cv.total) rows.push({ ok: true, t: 'todas as ' + cv.total + ' cartas já têm preço da Liga.' });
+    }).catch(function () {
+      rows.push({ ok: false, t: 'algo falhou no meio do caminho. Tente de novo.' });
+    }).then(function () {
+      updBusy = false; if (updReport) updReport.running = false; render();
+    });
+  }
   function viewMais() {
     barAction.innerHTML = ''; fab.innerHTML = '';
     var nag = needsBackup();
-    var gPrices = ('<h2 class="sec-h" style="padding:12px 0 0">Preços e dados</h2>' +
-      '<section class="card pad stack" aria-labelledby="pr"><h3 id="pr" style="font-size:1.0625rem">Atualizar preços e cartas</h3>' +
-      '<p class="muted small">Baixa preços, câmbio e dados das cartas. Faça antes de ir à loja: depois funciona sem internet.</p>' +
-      '<p class="small">Última atualização: <strong>' + (fmtDate(db.updatedAt) || 'nenhuma') + '</strong>' + (db.rate ? ' · US$ 1 = ' + brl.format(db.rate.brl) : '') + '</p>' +
-      '<button class="btn primary full" data-act="refresh">' + ICON.refresh + 'Atualizar agora</button>' +
+    var rep = updReport, rh = '';
+    if (rep) {
+      rh = '<ul class="upd-rows" style="list-style:none;padding:0;margin:0;display:grid;gap:8px">' + rep.rows.map(function (r) {
+        return '<li class="small"><strong>' + (r.ok === true ? 'Feito: ' : (r.ok === false ? 'Não deu: ' : 'Atenção: ')) + '</strong>' + esc(r.t) + (r.link ? ' <a href="' + r.link + '" style="display:inline-block;min-height:44px;line-height:44px">Importar por print</a>' : '') + '</li>';
+      }).join('') + '</ul>' + (rep.running ? '<p class="small"><strong>Atualizando… pode levar alguns segundos.</strong></p>' : '');
+    }
+    var gPrices = ('<h2 class="sec-h" style="padding:12px 0 0">Atualizar</h2>' +
+      '<section class="card pad stack" aria-labelledby="pr"><h3 id="pr" style="font-size:1.0625rem">Atualizar informações do app</h3>' +
+      '<p class="muted small">Um toque faz tudo: preços e dados das cartas, winrates dos confrontos e o backup na nuvem. Faça antes de ir à loja ou ao torneio: depois funciona sem internet.</p>' +
+      '<p class="small">Última atualização de preços: <strong>' + (fmtDate(db.updatedAt) || 'nenhuma') + '</strong>' + (db.rate ? ' · US$ 1 = ' + brl.format(db.rate.brl) : '') + '</p>' +
+      '<button class="btn primary full" data-act="updall"' + (updBusy ? ' disabled aria-disabled="true"' : '') + ' aria-busy="' + (updBusy ? 'true' : 'false') + '">' + ICON.refresh + (updBusy ? 'Atualizando…' : 'Atualizar tudo') + '</button>' +
+      '<div id="updOut" role="status" aria-live="polite">' + rh + '</div>' +
       '<p class="xs muted">Preço automático: Scryfall, em dólar. É só uma noção; vale o da Liga Magic, abaixo.</p></section>' +
       ligaSectionHtml());
     var gTools = ('<h2 class="sec-h" style="padding:12px 0 0">Ferramentas</h2>' +
@@ -2447,14 +2487,16 @@
       : (pool.length ? 'Nenhuma carta apareceu em 2 ou mais das suas ' + srcN + (srcN === 1 ? ' lista' : ' listas') + '. As que aparecem em uma só estão logo abaixo.'
         : 'Todas as cartas das suas ' + srcN + (srcN === 1 ? ' lista' : ' listas') + ' já estão no deck ou foram removidas daqui.')) + '</p>';
     if (pool.length) {
-      h += '<details class="small"' + (poolOpen === d.id ? ' open' : '') + ' id="consPool"><summary style="min-height:44px;display:flex;align-items:center;cursor:pointer"><strong>Outras cartas das suas listas (' + pool.length + ')</strong></summary><ul class="rows cons-rows">' +
-        pool.slice(0, 40).map(function (c) {
+      var poolSorted = pool.slice().sort(function (a, b) { return b.count - a.count || (a.board === b.board ? 0 : (a.board === 'main' ? -1 : 1)) || a.name.localeCompare(b.name); });
+      h += '<details class="small" open id="consPool"><summary style="min-height:44px;display:flex;align-items:center;cursor:pointer"><strong>' + (list.length ? 'Aparecem em uma fonte só' : 'Cartas das suas fontes') + ' (' + pool.length + ')</strong></summary>' +
+        '<p class="xs muted">Toque no + para guardar a carta em Em consideração. As que você não quiser, é só ignorar.</p><ul class="rows cons-rows">' +
+        poolSorted.slice(0, 40).map(function (c) {
           var info = cardInfo(c.name);
           return '<li class="r"><span class="q" aria-label="em ' + c.count + ' de ' + c.total + ' fontes" style="font-size:.8125rem;color:var(--muted)">' + c.count + '/' + c.total + '</span>' +
             '<button class="nm" data-card="' + esc(c.name) + '">' + esc(canonical(c.name)) + '<span class="d">' + c.qty + ' cópia' + (c.qty > 1 ? 's' : '') + (c.board === 'side' ? ' · sideboard' : '') + '</span></button>' +
             rowTools(info, c.name) +
             '<span class="ra"><button class="own" data-conspool="' + id + '|' + esc(c.name) + '" aria-label="Adicionar ' + esc(canonical(c.name)) + ' à lista Em consideração"><i style="border-color:var(--accent);color:var(--accent)">+</i></button></span></li>';
-        }).join('') + '</ul>' + (pool.length > 40 ? '<p class="xs muted">Mostrando as 40 que aparecem em mais listas.</p>' : '') + '</details>';
+        }).join('') + '</ul>' + (pool.length > 40 ? '<p class="xs muted">Mostrando 40 das ' + pool.length + '. Ao pôr algumas no deck ou na lista, as outras aparecem.</p>' : '') + '</details>';
     }
     return h + sourcesHtml(d) + '</section>';
   }
@@ -2910,6 +2952,8 @@
       copyText(FU.toLigaMagic(missingAgg(scope)), 'Lista copiada. Cole no "Comprar por lista" da Liga Magic.');
     } else if (act === 'shareMissing') {
       shareText('O que me falta', 'Preciso destas cartas:\n' + FU.toLigaMagic(missingAgg(scope)));
+    } else if (act === 'updall') {
+      updAll();
     } else if (act === 'refresh') {
       refreshPrices();
     } else if (act === 'copyDeckMissing') {
@@ -2930,8 +2974,6 @@
       sendBackup();
     } else if (act === 'syncon') {
       activateSync((document.getElementById('syKey') || {}).value);
-    } else if (act === 'syncnow') {
-      pushSync(true);
     } else if (act === 'syncrestore') {
       restoreFromCloud();
     } else if (act === 'syncoff') {
@@ -3100,7 +3142,6 @@
     if (sy.key) {
       h += '<p class="small">Ativo. Cada mudança nos decks é salva na nuvem sozinha, sem você fazer nada.</p>' +
         '<p class="small" id="syStatus" role="status" aria-live="polite"><strong>' + esc(syncMsg || (sy.at ? 'Último salvamento: ' + hhmm(sy.at) + '.' : 'Ainda não salvou.')) + '</strong></p>' +
-        '<button class="btn primary full" data-act="syncnow">Salvar agora</button>' +
         '<button class="btn full" data-act="syncrestore">Voltar da nuvem</button>' +
         '<button class="btn full" data-act="syncoff">Desativar neste celular</button>';
     } else {
