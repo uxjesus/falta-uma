@@ -15,9 +15,9 @@ const out = (obj, status = 200) =>
    Toda semana (cron) o servidor lê os torneios recentes do TopDeck.gg, soma quem ganhou de quem
    por arquétipo e guarda o resultado. O app só lê /meta, sem chave. Dados: TopDeck.gg (https://topdeck.gg). */
 const FORMATS = ["Premodern"];
-const DAYS = 90;
+const KEEP_MONTHS = 12; // quantos meses entram na conta
 const MIN_TOTAL = 30; // arquétipo com menos partidas que isso no período não entra
-const META_V = 2; // sobe quando a tabela de nomes muda: dado de versão antiga é refeito na próxima leitura
+const META_V = 3; // sobe quando a tabela de nomes muda: dado de versão antiga é refeito na próxima leitura
 /* O TopDeck nomeia os decks com cores na frente ("Azorius Standstill", "Mono Blue Stiflenought", "5 Color Gro-A-Tog",
    "Wurg Terragedon"). Aqui o nome vira o do app pela palavra que identifica o deck, não pelo nome inteiro.
    Variantes de cor do mesmo deck somam juntas. Ordem importa: a primeira regra que bater vale. */
@@ -42,37 +42,55 @@ function normArch(raw) {
   for (const [re, name] of ALIAS) if (re.test(k)) return name;
   return k.replace(/\b\w/g, (c) => c.toUpperCase());
 }
-async function buildMeta(env, format) {
+/* Acúmulo por mês: cada mês fica guardado separado (meta-m:<formato>:<AAAA-MM>). Mês fechado há mais de 5 dias nunca é buscado
+   de novo; o mês aberto é refeito inteiro a cada atualização (assim nenhuma partida conta duas vezes). Só os últimos
+   KEEP_MONTHS meses entram na conta: o meta muda e dado muito velho atrapalha. */
+function monthsBack(n) { // mais recente primeiro: ["2026-11", "2026-10", ...]
+  const out = [], d = new Date(); d.setUTCDate(1);
+  for (let i = 0; i < n; i++) { out.push(d.toISOString().slice(0, 7)); d.setUTCMonth(d.getUTCMonth() - 1); }
+  return out;
+}
+async function fetchMonth(env, format, ym) {
+  const [y, mo] = ym.split("-").map(Number);
+  const start = Math.floor(Date.UTC(y, mo - 1, 1) / 1000), end = Math.floor(Date.UTC(y, mo, 1) / 1000) - 1;
   const r = await fetch("https://topdeck.gg/api/v2/tournaments", {
     method: "POST",
     headers: { "Authorization": env.TOPDECK_KEY, "Content-Type": "application/json" },
-    body: JSON.stringify({ game: "Magic: The Gathering", format, last: DAYS, columns: ["name"], rounds: true }),
+    body: JSON.stringify({ game: "Magic: The Gathering", format, start, end, columns: ["name"], rounds: true }),
   });
-  if (!r.ok) throw new Error("TopDeck respondeu " + r.status);
+  if (!r.ok) throw new Error("TopDeck respondeu " + r.status + " (mês " + ym + ")");
   const events = await r.json();
-  const pair = {}; // "A|B" -> [vitórias de A sobre B, partidas]
-  const total = {};
-  const nomes = {}; // "nome no TopDeck => nome no app": ajuda a achar nome novo sem reconhecer
-  let matches = 0;
+  const b = { m: ym, events: (events || []).length, matches: 0, pair: {}, total: {}, nomes: {}, fetchedAt: Date.now(), closed: Date.now() > end * 1000 + 5 * 86400000 };
   for (const ev of events || []) {
     for (const rd of ev.rounds || []) {
       for (const t of rd.tables || []) {
         if (t.status !== "Completed" || !t.winner_id || t.winner_id === "Draw" || !t.players || t.players.length !== 2) continue;
         const [p1, p2] = t.players;
         const a1 = normArch(p1.archetype), a2 = normArch(p2.archetype);
-        for (const [rw, nm] of [[p1.archetype, a1], [p2.archetype, a2]]) if (nm) { const kk = rw + " => " + nm; nomes[kk] = (nomes[kk] || 0) + 1; }
+        for (const [rw, nm] of [[p1.archetype, a1], [p2.archetype, a2]]) if (nm) { const kk = rw + " => " + nm; b.nomes[kk] = (b.nomes[kk] || 0) + 1; }
         if (!a1 || !a2) continue;
         const w = p1.id === t.winner_id ? a1 : a2, l = p1.id === t.winner_id ? a2 : a1;
-        matches++;
-        total[a1] = (total[a1] || 0) + 1; total[a2] = (total[a2] || 0) + 1;
+        b.matches++;
+        b.total[a1] = (b.total[a1] || 0) + 1; b.total[a2] = (b.total[a2] || 0) + 1;
         if (w === l) continue; // espelho não conta
-        for (const [x, y, won] of [[w, l, 1], [l, w, 0]]) {
-          const k = x + "|" + y;
-          pair[k] = pair[k] || [0, 0];
-          pair[k][0] += won; pair[k][1] += 1;
+        for (const [x, y2, won] of [[w, l, 1], [l, w, 0]]) {
+          const k = x + "|" + y2;
+          b.pair[k] = b.pair[k] || [0, 0];
+          b.pair[k][0] += won; b.pair[k][1] += 1;
         }
       }
     }
+  }
+  return b;
+}
+function assemble(format, months, have) {
+  const pair = {}, total = {}, nomes = {}; let matches = 0, events = 0; const got = [];
+  for (const ym of months) {
+    const b = have[ym]; if (!b) continue;
+    got.push(ym); events += b.events; matches += b.matches;
+    for (const k of Object.keys(b.pair)) { const a = (pair[k] = pair[k] || [0, 0]); a[0] += b.pair[k][0]; a[1] += b.pair[k][1]; }
+    for (const k of Object.keys(b.total)) total[k] = (total[k] || 0) + b.total[k];
+    for (const k of Object.keys(b.nomes)) nomes[k] = (nomes[k] || 0) + b.nomes[k];
   }
   const decks = {};
   for (const k of Object.keys(pair)) {
@@ -81,15 +99,29 @@ async function buildMeta(env, format) {
     (decks[x] = decks[x] || []).push({ opp: y, wr: Math.round((pair[k][0] / pair[k][1]) * 1000) / 10, n: pair[k][1] });
   }
   for (const x of Object.keys(decks)) decks[x].sort((a, b) => b.n - a.n);
-  return { v: META_V, events: (events || []).length, fonte: "TopDeck.gg (topdeck.gg), últimos " + DAYS + " dias", data: new Date().toISOString().slice(0, 10), format, matches, decks, nomes };
+  const de = got[got.length - 1], ate = got[0];
+  return { v: META_V, events, fonte: "TopDeck.gg (topdeck.gg), " + (got.length > 1 ? "de " + de + " a " + ate : "mês " + ate), data: new Date().toISOString().slice(0, 10), format, matches, decks, nomes, periodo: { de, ate, meses: got.length }, completo: got.length === months.length };
 }
-async function refreshAll(env) {
+/* budget = quantos meses buscar nesta chamada (limite do TopDeck: 5 pedidos por minuto). Mês aberto primeiro, depois os que faltam, do mais novo ao mais antigo. */
+async function refreshAll(env, budget = 3) {
   const res = {};
   for (const f of FORMATS) {
     try {
-      const m = await buildMeta(env, f);
-      if (!m.matches) throw new Error("TopDeck respondeu, mas sem partidas com deck identificado (" + m.events + " torneios)");
-      await env.BACKUP.put("meta:" + f, JSON.stringify(m)); await env.BACKUP.delete("meta-err:" + f); res[f] = m.matches;
+      const months = monthsBack(KEEP_MONTHS);
+      const have = {};
+      for (const ym of months) { const raw = await env.BACKUP.get("meta-m:" + f + ":" + ym); if (raw) have[ym] = JSON.parse(raw); }
+      const todo = months.filter((ym) => !have[ym] || !have[ym].closed).slice(0, budget);
+      let err = null;
+      for (const ym of todo) {
+        try { const b = await fetchMonth(env, f, ym); have[ym] = b; await env.BACKUP.put("meta-m:" + f + ":" + ym, JSON.stringify(b)); }
+        catch (e) { err = e; break; }
+      }
+      for (const old of monthsBack(KEEP_MONTHS + 3).slice(KEEP_MONTHS)) await env.BACKUP.delete("meta-m:" + f + ":" + old);
+      const m = assemble(f, months, have);
+      if (!m.matches) throw err || new Error("TopDeck respondeu, mas sem partidas com deck identificado (" + m.events + " torneios)");
+      await env.BACKUP.put("meta:" + f, JSON.stringify(m));
+      if (err) await env.BACKUP.put("meta-err:" + f, String(err.message).slice(0, 300), { expirationTtl: 86400 }); else await env.BACKUP.delete("meta-err:" + f);
+      res[f] = m.matches + " partidas, " + m.periodo.meses + "/" + months.length + " meses" + (err ? " (parou: " + err.message + ")" : "");
     } catch (e) { res[f] = "erro: " + e.message; await env.BACKUP.put("meta-err:" + f, String(e.message).slice(0, 300), { expirationTtl: 86400 }); }
   }
   return res;
@@ -107,12 +139,12 @@ export default {
       const text = FORMATS.includes(f) ? await env.BACKUP.get("meta:" + f) : null;
       /* Sem dado, ou dado com mais de 8 dias: tenta buscar agora (no máximo uma vez a cada 10 minutos), sem esperar o sábado. */
       if (FORMATS.includes(f) && env.TOPDECK_KEY) {
-        let old = true, wrongV = !text;
-        try { const j = JSON.parse(text || "null"); wrongV = !j || j.v !== META_V; old = wrongV || Date.now() - Date.parse(j.data) > 8 * 86400000; } catch (e) {}
+        let old = true, wrongV = !text, inc = true;
+        try { const j = JSON.parse(text || "null"); wrongV = !j || j.v !== META_V; inc = wrongV || !j.completo; old = inc || Date.now() - Date.parse(j.data) > 8 * 86400000; } catch (e) {}
         if (old && !(await env.BACKUP.get("meta-try:" + f))) {
-          await env.BACKUP.put("meta-try:" + f, "1", { expirationTtl: 600 });
-          if (wrongV) { try { await refreshAll(env); const again = await env.BACKUP.get("meta:" + f); if (again) return new Response(again, { headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "no-store" } }); } catch (e) {} }
-          else ctx.waitUntil(refreshAll(env));
+          await env.BACKUP.put("meta-try:" + f, "1", { expirationTtl: inc ? 60 : 600 }); // enquanto falta histórico, tenta de novo em 1 minuto
+          if (wrongV) { try { await refreshAll(env, 2); const again = await env.BACKUP.get("meta:" + f); if (again) return new Response(again, { headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "no-store" } }); } catch (e) {} }
+          else ctx.waitUntil(refreshAll(env, 4));
         }
       }
       return text ? new Response(text, { headers: { ...CORS, "Content-Type": "application/json", "Cache-Control": "no-cache" } }) : pub({ empty: true, err: (await env.BACKUP.get("meta-err:" + f)) || (env.TOPDECK_KEY ? null : "falta TOPDECK_KEY no servidor") }, 404, "no-store");
