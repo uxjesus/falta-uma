@@ -400,8 +400,9 @@ a.lg .icon{width:20px;height:20px}
 .mu-row[aria-expanded="true"]{background:var(--accent-soft);border-color:var(--accent)}
 .mu-row .o{font-weight:800}.mu-row .w{font-weight:800;font-variant-numeric:tabular-nums;font-size:1.0625rem}
 .mu-row .s{grid-column:1/-1;font-size:.8125rem;color:var(--muted)}
-.mu-panel{display:grid;gap:10px;padding:12px;margin-top:-4px;border:1.5px solid var(--line-strong);border-left:4px solid var(--accent);border-radius:var(--r-sm);background:var(--surface)}
+.mu-panel{display:grid;grid-template-columns:minmax(0,1fr);min-width:0;gap:10px;padding:12px;margin-top:-4px;border:1.5px solid var(--line-strong);border-left:4px solid var(--accent);border-radius:var(--r-sm);background:var(--surface)}
 .mu-row[aria-expanded="true"] .s{color:var(--text)}
+.mu-panel .chip{white-space:normal;max-width:100%}
 .mu-panel .lnk{display:inline-flex;align-items:center;min-height:44px;font-weight:700}
 .primer{margin:16px;padding:16px;display:grid;gap:10px;border-radius:var(--r);background:var(--accent-soft);border:1.5px solid var(--accent);border-left-width:6px}
 .primer h2{font-size:1.25rem}.primer .ph{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}

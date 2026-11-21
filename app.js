@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.30.0';
+  var APP_VERSION = '0.30.1';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -1000,15 +1000,15 @@
     if (sheetCtx.type === 'guide') {
       var gdk = deckById(ctx);
       if (!gdk) return;
-      if (t.hasAttribute('data-gcopy')) { copyText(FU.guidePrompt(guideDeckInfo(gdk)), 'Pedido copiado. Cole na sua IA e anexe o print.'); return; }
-      if (t.hasAttribute('data-gai')) { openAi(AIS[0], FU.guidePrompt(guideDeckInfo(gdk)), 'Pedido copiado. Se a IA abrir vazia, é só colar e anexar o print.'); return; }
+      if (t.hasAttribute('data-gcopy')) { copyText(guideCurrentPrompt(gdk), guideMu ? 'Pedido copiado. Cole na sua IA.' : 'Pedido copiado. Cole na sua IA e anexe o print.'); return; }
+      if (t.hasAttribute('data-gai')) { openAi(AIS[0], guideCurrentPrompt(gdk), guideMu ? 'Pedido copiado. Se a IA abrir vazia, é só colar.' : 'Pedido copiado. Se a IA abrir vazia, é só colar e anexar o print.'); return; }
       if (t.hasAttribute('data-gcheck')) {
         var gin = document.getElementById('gIn'), gmsg = document.getElementById('gMsg');
         guideText = gin.value; gin.removeAttribute('aria-invalid');
         var bad = function (m) { gmsg.textContent = m; gin.setAttribute('aria-invalid', 'true'); gin.focus(); };
         if (!guideText.trim()) { bad('Cole primeiro a resposta da IA.'); return; }
         if (guideText.length > 100000) { bad('Texto grande demais. Cole só a resposta da IA, sem o resto da conversa.'); return; }
-        var gp = FU.parseGuide(guideText), skipped = 0;
+        var gp = FU.parseGuide(guideMu && !/adversari/i.test(guideText) && /^\s*(```\s*)?(entra|sai)\s*:/im.test(guideText) ? 'ADVERSARIO: ' + guideMu.r.o + '\n' + guideText : guideText), skipped = 0;
         if (gdk.format !== 'Premodern' && gp.guides.length) { skipped = gp.guides.length; gp.guides = []; }
         gp.skipped = skipped;
         if (!gp.primer && !gp.guides.length && !skipped) { bad(gp.errors.length ? gp.errors[0] : 'Não achei nenhum bloco no formato (ADVERSARIO, ENTRA, SAI, NOTAS). Peça à IA para devolver só o bloco, ou cole de novo.'); return; }
@@ -2375,8 +2375,8 @@
       'Meu deck principal:\n' + deckLines(d, false),
       'Meu sideboard:\n' + deckLines(d, true),
       'Cartas que eu tenho fora dos decks (coleção):\n' + spare,
-      'IMPORTANTE: pesquise guias, listas de torneio e discussões (fóruns, Reddit, Discord público) e devolva o plano dentro de UM ÚNICO bloco de código (três crases), no formato abaixo, para eu tocar no botão de copiar. Toda explicação fica fora do bloco.\nFormato do bloco:\nENTRA:\n<quantidade> <carta> | <motivo curto> | <fonte e data>\nSAI:\n<quantidade> <carta> | <motivo curto>\nNÃO TENHO:\n<carta> | <motivo>',
-      'Regras:\n1. Diga o que TIRAR e o que COLOCAR, mantendo 60 cartas no principal e 15 no sideboard.\n2. Use SÓ cartas do meu deck, do meu sideboard ou da minha coleção. Se uma carta muito boa não estiver em nenhuma, coloque-a numa lista à parte marcada "você não tem".\n3. Cada sugestão com a fonte (link) e a data. Marque como "inferência" o que for raciocínio seu e não vier de uma fonte.\n4. Com menos de 30 partidas, diga que o número é só uma pista. Se não achar fontes boas, diga isso em vez de inventar.\n5. Explique em passos curtos, em português.'
+      'IMPORTANTE: pesquise guias, listas de torneio e discussões (fóruns, Reddit, Discord público) e devolva o plano dentro de UM ÚNICO bloco de código (três crases), no formato abaixo, para eu tocar no botão de copiar. Toda explicação fica fora do bloco.\nFormato do bloco:\nADVERSARIO: ' + r.o + '\nENTRA:\n<quantidade> <carta>\nSAI:\n<quantidade> <carta>\nNOTAS:\n- <motivo curto de cada troca, e o que eu não tenho, se houver>\nFONTE: <links e datas>',
+      'Regras:\n1. Diga o que TIRAR e o que COLOCAR, mantendo 60 cartas no principal e 15 no sideboard.\n2. Use SÓ cartas do meu deck, do meu sideboard ou da minha coleção. Se uma carta muito boa não estiver em nenhuma, cite-a em NOTAS como "você não tem".\n3. Em FONTE, os links e as datas. Em NOTAS, marque como "inferência" o que for raciocínio seu e não vier de uma fonte.\n4. Com menos de 30 partidas, diga que o número é só uma pista. Se não achar fontes boas, diga isso em vez de inventar.\n5. Explique em passos curtos, em português.'
     ].join('\n\n');
   }
   function planHtml(d, note, lookup) {
@@ -2390,10 +2390,11 @@
     return h + '<p class="xs">' + (note.partial ? 'O guia só nomeia parte das trocas, sem quantidades.' : 'Entram ' + sum(note.plan.in) + ' · saem ' + sum(note.plan.out) + '. As trocas são as do autor para a lista dele: confira com a sua.') + '</p>';
   }
   function userNote(d, opp) {
-    var u = d.mu && Object.prototype.hasOwnProperty.call(d.mu, opp) ? d.mu[opp] : null;
+    var gk = guideKey(d, opp), u = d.mu && Object.prototype.hasOwnProperty.call(d.mu, gk) ? d.mu[gk] : null;
     return u ? { plan: u.plan && (u.plan.in.length || u.plan.out.length) ? u.plan : null, lines: u.lines || [], src: u.src || [], partial: !!u.partial, unreadable: u.unreadable || 0, user: true } : null;
   }
   function matchupPanel(d, arch, r, date, user) {
+    if (!user && !FU.sideNote(arch, r.o) && d.mu && Object.prototype.hasOwnProperty.call(d.mu, guideKey(d, r.o))) user = true;
     var note = user ? userNote(d, r.o) : FU.sideNote(arch, r.o), lookup = collLookup();
     var h = '<div class="mu-panel"><p class="small"><strong>' + esc(arch) + ' × ' + esc(r.o) + '</strong>' + (r.wr == null ? '' : ': ' + r.wr + '% em ' + r.n + ' partidas' + (r.n < FU.META_SMALL ? ' (amostra pequena: use como pista)' : '')) + '.</p>';
     if (note) {
@@ -2412,15 +2413,16 @@
       h += '<p class="small">Ainda não tenho um guia conferido para este confronto, e não vou inventar. Peça à sua IA: o pedido já vai com o seu deck, o seu sideboard e a sua coleção.</p>';
     }
     if (user) return h + '<p class="xs">Guia que você importou de um print, lido pela sua IA. Confira com o original.</p><button type="button" class="btn full" data-gdelmu="' + esc(d.id) + '|' + esc(r.o) + '">Remover este guia</button></div>';
-    h += '<button type="button" class="btn primary full" data-muai="' + esc(d.id) + '|' + esc(r.o) + '">Pedir sugestão à IA (abre o Claude)</button>' +
-      '<button type="button" class="btn full" data-mucopy="' + esc(d.id) + '|' + esc(r.o) + '">' + ICON.copy + 'Copiar o pedido</button>' +
+    h += '<button type="button" class="btn primary full" data-muai="' + esc(d.id) + '|' + esc(r.o) + '">Pedir sugestão à IA e guardar a resposta</button>' +
       '<p class="xs"><a class="lnk" href="https://mtgdecks.net/Premodern/' + esc(encodeURIComponent(arch.toLowerCase().replace(/\s+/g, '-'))) + '" target="_blank" rel="noopener">Abrir ' + esc(arch) + ' no MTG Decks</a></p></div>';
     return h;
   }
   /* Guias conferidos que não dependem de winrates: abrem direto, mesmo sem dados do servidor. */
+  var muShown = {};
   function guideRows(d, arch, skip, title, few) {
     var opps = FU.sideNotesFor(arch).filter(function (o) { return !skip[o]; });
     if (!opps.length) return '';
+    opps.forEach(function (o) { muShown[FU.noAcc(o)] = true; });
     var h = '<h3 class="small" style="margin-top:8px"><strong>' + esc(title) + '</strong></h3>';
     opps.forEach(function (o) {
       var id = d.id + '|' + o, open = !!muOpen[id];
@@ -2542,11 +2544,12 @@
       '<p class="xs">' + (p.src ? 'Fonte: ' + esc(p.src) : 'Fonte não informada no print') + ' · importado de um print: confira com o original.</p>' +
       '<div class="pact"><button type="button" class="btn" data-guide="' + id + '">Importar outro</button><button type="button" class="btn" data-primerdel="' + id + '">Remover</button></div></section>';
   }
-  var guideText = '', guideDraft = null;
+  var guideText = '', guideDraft = null, guideMu = null;
+  function guideCurrentPrompt(d) { return guideMu ? matchupAiPrompt(d, guideMu.arch, guideMu.r, guideMu.date) : FU.guidePrompt(guideDeckInfo(d)); }
   function guideDeckInfo(d) { return { name: d.name, arch: d.format === 'Premodern' ? archOf(d) : '', format: d.format, main: deckLines(d, false), side: deckLines(d, true) }; }
   function guideInputHtml(d) {
-    return '<h2 id="sheetTitle">Importar guia pela IA</h2>' +
-      '<ol class="small" style="padding-left:20px;display:grid;gap:6px"><li>Toque em <strong>Copiar pedido</strong>.</li><li>Cole na sua IA e anexe o print do guia.</li><li>Copie a resposta e cole aqui embaixo.</li></ol>' +
+    return '<h2 id="sheetTitle">' + (guideMu ? 'Sugestão da IA: contra ' + esc(guideMu.r.o) : 'Importar guia pela IA') + '</h2>' +
+      '<ol class="small" style="padding-left:20px;display:grid;gap:6px"><li>Toque em <strong>Copiar pedido</strong>.</li><li>Cole na sua IA' + (guideMu ? '.' : ' e anexe o print do guia.') + '</li><li>Copie a resposta e cole aqui embaixo.</li></ol>' +
       '<button type="button" class="btn primary full" data-gcopy style="margin-top:8px">' + ICON.copy + 'Copiar pedido</button>' +
       '<button type="button" class="btn full" data-gai style="margin-top:8px">Abrir o Claude com o pedido</button>' +
       '<label for="gIn" class="small" style="display:block;margin-top:16px"><strong>Resposta da IA</strong></label>' +
@@ -2590,7 +2593,7 @@
     });
   }
   function userGuideCard(d) {
-    var keys = d.format === 'Premodern' ? Object.keys(d.mu || {}) : [];
+    var keys = d.format === 'Premodern' ? Object.keys(d.mu || {}).filter(function (o) { return !muShown[FU.noAcc(o)]; }) : [];
     if (!keys.length) return '';
     var arch = archOf(d) || 'Seu guia';
     var h = '<section class="card pad stack mu" aria-labelledby="ugH" style="margin:16px"><h2 id="ugH" tabindex="-1" style="font-size:1.0625rem">Seus guias importados</h2>';
@@ -2601,7 +2604,7 @@
     });
     return h + '</section>';
   }
-  function matchupCard(d) { return matchupBase(d) + userGuideCard(d); }
+  function matchupCard(d) { muShown = {}; return matchupBase(d) + userGuideCard(d); }
   function matchupBase(d) {
     if (d.format !== 'Premodern') return '';
     var arch = archOf(d), auto = FU.suggestArch(d.name);
@@ -2617,6 +2620,7 @@
       return h + (only ? '<p class="small">Ainda sem winrates para <strong>' + esc(arch) + '</strong>, mas já há guias conferidos por confronto:</p>' + only : '<p class="small">Ainda sem winrates para <strong>' + esc(arch) + '</strong>.</p>') + '<a class="btn' + (only ? '' : ' primary') + ' full" href="#/meta">Importar winrates</a></section>';
     }
     var age = FU.metaAgeDays(e.date), sp = FU.metaSplit(e.rows), asc = !state.ui.muBest;
+    sp.ok.forEach(function (r) { if (!FU.sideNote(arch, r.o)) muShown[FU.noAcc(r.o)] = true; });
     h += '<p class="small" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">Dados de <strong>' + esc(metaDateText(e.date)) + '</strong> · ' + esc(e.source || 'MTG Decks') +
       (age != null && age > FU.META_STALE_DAYS ? '<span class="seal warn">' + ICO_WARN + 'Desatualizado (' + age + ' dias)</span>' : '') + '</p>';
     if (!sp.ok.length) {
@@ -2780,7 +2784,7 @@
       }
       return;
     }
-    if (t.hasAttribute('data-guide')) { guideText = ''; openSheet('guide', t.getAttribute('data-guide'), t); return; }
+    if (t.hasAttribute('data-guide')) { guideText = ''; guideMu = null; openSheet('guide', t.getAttribute('data-guide'), t); return; }
     if (t.hasAttribute('data-primerdel')) {
       var pdk = deckById(t.getAttribute('data-primerdel'));
       if (pdk && confirm('Remover o "Como jogar" deste deck? Os guias por adversário não mudam.')) { delete pdk.primer; persist(true); render(); toast('Removido.'); }
@@ -2858,14 +2862,14 @@
     }
     if (t.hasAttribute('data-musort')) { state.ui.muBest = !state.ui.muBest; persist(false); var ys = window.scrollY; render(); window.scrollTo(0, ys); keepFocus('[data-musort]'); return; }
     if (t.hasAttribute('data-mu')) { var mk = t.getAttribute('data-mu'); muOpen[mk] = !muOpen[mk]; render(); keepFocus('[data-mu="' + keepFocusSafe(mk) + '"]'); return; }
-    if (t.hasAttribute('data-muai') || t.hasAttribute('data-mucopy')) {
-      var mv = (t.getAttribute('data-muai') || t.getAttribute('data-mucopy')).split('|'), md = deckById(mv[0]);
+    if (t.hasAttribute('data-muai')) {
+      var mv = t.getAttribute('data-muai').split('|'), md = deckById(mv[0]);
       var ma = md ? archOf(md) : '', me = ma ? FU.metaEntry(state.meta, ma) : null;
       var mr = me && me.rows.filter(function (r) { return r.o === mv.slice(1).join('|'); })[0];
       if (!mr && md && ma) mr = { o: mv.slice(1).join('|'), wr: null, n: null };
       if (!mr) return;
-      var mp = matchupAiPrompt(md, ma, mr, me ? me.date : null);
-      if (t.hasAttribute('data-muai')) openAi(AIS[0], mp, 'Pedido copiado. Se a IA abrir vazia, é só colar.'); else copyText(mp, 'Pedido copiado. Cole na sua IA.');
+      guideText = ''; guideMu = { arch: ma, r: mr, date: me ? me.date : null };
+      openSheet('guide', md.id, t);
       return;
     }
     if (t.hasAttribute('data-mfetch')) { metaFetch(false); return; }
