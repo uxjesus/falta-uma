@@ -263,3 +263,15 @@ test('considerNeed soma só o que falta, descontando o que a pessoa tem solto', 
   const d = { consider: [{ name: 'A', qty: 2 }, { name: 'B', qty: 1 }] };
   assert.equal(FU.considerNeed(d, (n) => (n === 'A' ? 1 : 5)), 1);
 });
+
+test('DURESS: dados embutidos válidos, espelhados e cobrindo os arquétipos da lista', () => {
+  const D = FU.DURESS, names = Object.keys(D.decks);
+  assert.ok(/Duress Crew/.test(D.source) && /^\d{4}-\d{2}-\d{2}$/.test(D.date));
+  for (const a of names) for (const r of D.decks[a]) { assert.ok(r.wr >= 0 && r.wr <= 100 && r.n > 0 && r.o !== a, a + ' x ' + r.o); }
+  const get = (a, o) => D.decks[a].filter((r) => r.o === o)[0];
+  assert.equal(get('Landstill', 'Stasis').wr, 13.5); assert.equal(get('Landstill', 'Stasis').n, 37);
+  // o confronto visto dos dois lados soma 100% (±0,1 por arredondamento)
+  assert.ok(Math.abs(get('Landstill', 'Terrageddon').wr + get('Terrageddon', 'Landstill').wr - 100) < 0.11);
+  assert.ok(Math.abs(get('Deadguy Ale', 'Burn').wr + get('Burn', 'Deadguy Ale').wr - 100) < 0.11);
+  FU.META_ARCHS.filter((a) => a !== 'Full English Breakfast').forEach((a) => assert.ok(D.decks[a], 'sem dados para ' + a));
+});

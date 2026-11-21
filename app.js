@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.28.1';
+  var APP_VERSION = '0.29.0';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -2178,7 +2178,7 @@
   }
   function metaSectionHtml() {
     return '<section class="card pad stack" aria-labelledby="mg"><h2 id="mg" style="font-size:1.0625rem">Importar winrates</h2>' +
-      '<p class="muted small">O app busca sozinho a taxa de vitória dos seus decks Premodern contra os decks mais jogados (TopDeck.gg). O resultado aparece no fim de cada deck, com a data.</p>' +
+      '<p class="muted small">O app já traz a taxa de vitória dos decks Premodern contra os outros decks. O resultado aparece no fim de cada deck, com a fonte e a data.</p>' +
       '<p class="small"><strong>' + esc(metaSummaryLine()) + '</strong></p>' +
       '<a class="btn primary full" href="#/meta">Importar winrates</a></section>';
   }
@@ -2274,11 +2274,27 @@
       if (!rows.length) return;
       var old = Object.keys(state.meta.decks).filter(function (x) { return FU.key(x) === FU.key(k); })[0];
       if (old && (state.meta.decks[old].date || '') > date) return;
+      if (old && /^Duress/.test(state.meta.decks[old].source || '')) return;
       if (old) delete state.meta.decks[old];
       state.meta.decks[k] = { date: date, source: j.fonte || TOPDECK_SRC, savedAt: Date.now(), rows: rows };
       changed++;
     });
     return changed;
+  }
+  /* Winrates da Duress Crew vêm junto com o app (logic.js). Valem para qualquer deck Premodern novo, mesmo offline.
+     Não trocam o que a pessoa importou à mão de uma data igual ou mais nova. */
+  function duressApply() {
+    var D = FU.DURESS, n = 0; if (!D) return 0;
+    state.meta = state.meta || { decks: {} }; state.meta.decks = state.meta.decks || {};
+    Object.keys(D.decks).forEach(function (k) {
+      var old = Object.keys(state.meta.decks).filter(function (x) { return FU.key(x) === FU.key(k); })[0], e = old && state.meta.decks[old];
+      if (e && e.source === D.source && e.date === D.date) return;
+      if (e && e.source !== D.source && !/^TopDeck\.gg/.test(e.source || '') && (e.date || '') >= D.date) return;
+      if (old) delete state.meta.decks[old];
+      state.meta.decks[k] = { date: D.date, source: D.source, savedAt: Date.now(), rows: D.decks[k].map(function (r) { return { o: r.o, wr: r.wr, n: r.n }; }) };
+      n++;
+    });
+    return n;
   }
   function metaFetch(silent) {
     if (!navigator.onLine) { if (!silent) toast('Sem internet.'); return Promise.resolve(false); }
@@ -2292,6 +2308,7 @@
       return true;
     }).catch(function () { if (!silent) toast('Não consegui falar com o servidor.'); return false; });
   }
+  if (duressApply()) persist(true);
   setTimeout(function () { if (premodernDecks().length && (!state.metaFetchAt || Date.now() - state.metaFetchAt > META_AUTO_MS)) metaFetch(true); }, 1500);
   function collLookup() {
     var m = {}; collectionData().forEach(function (r) { m[FU.key(r.name)] = r; });
