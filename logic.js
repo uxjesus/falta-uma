@@ -809,6 +809,16 @@
     });
     return added;
   }
+  /* Todas as cartas das listas da Pesquisa que não estão no deck, na lista nem foram removidas (inclusive as que aparecem em uma lista só). */
+  function considerPool(d, canonical) {
+    var inDeck = {}, no = {};
+    (d.cards || []).forEach(function (c) { inDeck[key(canonical ? canonical(c.name) : c.name)] = 1; });
+    (d.consNo || []).forEach(function (n) { no[key(n)] = 1; });
+    return consensus(d.sources || []).filter(function (c) {
+      var k = key(canonical ? canonical(c.name) : c.name);
+      return !inDeck[k] && !no[k] && !considerHas(d, c.name, canonical);
+    });
+  }
   function considerNeed(d, haveOf) {
     return (d.consider || []).reduce(function (t, c) { return t + Math.max(0, c.qty - Math.min(c.qty, haveOf(c.name) || 0)); }, 0);
   }
@@ -820,7 +830,7 @@
     DURESS: DURESS,
     META_MIN: META_MIN, META_SMALL: META_SMALL, META_STALE_DAYS: META_STALE_DAYS, META_ARCHS: META_ARCHS,
     suggestArch: suggestArch, parseMeta: parseMeta, parseMetaTable: parseMetaTable, b64urlDecode: b64urlDecode, b64urlEncode: b64urlEncode,
-    metaEntry: metaEntry, metaSplit: metaSplit, metaAgeDays: metaAgeDays, sideNote: sideNote, sideNotesFor: sideNotesFor, planList: planList, noteCardStatus: noteCardStatus, parseGuide: parseGuide, noAcc: noAcc, considerAdd: considerAdd, considerRemove: considerRemove, considerHas: considerHas, considerSuggestions: considerSuggestions, considerSync: considerSync, considerNeed: considerNeed, guideTotals: guideTotals, guidePrompt: guidePrompt,
+    metaEntry: metaEntry, metaSplit: metaSplit, metaAgeDays: metaAgeDays, sideNote: sideNote, sideNotesFor: sideNotesFor, planList: planList, noteCardStatus: noteCardStatus, parseGuide: parseGuide, noAcc: noAcc, considerAdd: considerAdd, considerRemove: considerRemove, considerHas: considerHas, considerSuggestions: considerSuggestions, considerSync: considerSync, considerPool: considerPool, considerNeed: considerNeed, guideTotals: guideTotals, guidePrompt: guidePrompt,
     parsePriceBR: parsePriceBR, parseLigaPrices: parseLigaPrices,
     edsSum: edsSum, edsMerge: edsMerge, edsTake: edsTake, edsPop: edsPop,
     splitSource: splitSource, markOwned: markOwned,

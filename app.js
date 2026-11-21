@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.29.0';
+  var APP_VERSION = '0.29.1';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -2391,6 +2391,7 @@
 
   /* ---------- Em consideração: cartas que talvez entrem no deck ---------- */
   function consNeedOf(d) { return FU.considerNeed(d, spareQty); }
+  var poolOpen = '';
   function considerHtml(d) {
     if (d.format === 'Lista') return '';
     var list = d.consider || [], id = esc(d.id), need = consNeedOf(d), val = 0;
@@ -2415,7 +2416,20 @@
           '<button type="button" class="btn" data-consrm="' + ref + '" aria-label="Remover ' + nm + ' da lista">Remover</button></div></li>';
       }).join('') + '</ul>';
       if (need) h += '<p class="small"><strong>Faltam ' + need + (need === 1 ? ' carta' : ' cartas') + '</strong>' + (val ? ' · ≈ ' + brl0.format(val) : '') + ' desta lista.</p>';
-    } else h += '<p class="small">Nenhuma carta aqui ainda. Junte listas na aba Pesquisa ou busque uma carta acima.</p>';
+    }
+    var pool = FU.considerPool(d, canonical), srcN = (d.sources || []).filter(function (x) { return x.cards && x.cards.length; }).length;
+    if (!list.length) h += '<p class="small">' + (!srcN ? '<strong>Este deck não tem listas na aba Pesquisa.</strong> Junte listas lá e as cartas delas aparecem aqui. Você também pode buscar uma carta acima.'
+      : (pool.length ? 'Nenhuma carta apareceu em 2 ou mais das suas ' + srcN + (srcN === 1 ? ' lista' : ' listas') + '. As que aparecem em uma só estão logo abaixo.'
+        : 'Todas as cartas das suas ' + srcN + (srcN === 1 ? ' lista' : ' listas') + ' já estão no deck ou foram removidas daqui.')) + '</p>';
+    if (pool.length) {
+      h += '<details class="small"' + (poolOpen === d.id ? ' open' : '') + ' id="consPool"><summary style="min-height:44px;display:flex;align-items:center;cursor:pointer">Outras cartas das suas listas (' + pool.length + ')</summary><ul class="cons-list">' +
+        pool.slice(0, 40).map(function (c) {
+          var pr = moneyShort(cardInfo(c.name), 1);
+          return '<li class="cr"><div class="cn"><button class="nm" data-card="' + esc(c.name) + '">' + c.qty + '× ' + esc(c.name) + '</button>' +
+            '<span class="xs muted">' + (c.board === 'side' ? 'sideboard' : 'principal') + ' · aparece em ' + c.count + ' de ' + c.total + (c.total === 1 ? ' fonte' : ' fontes') + (pr ? ' · ' + pr + ' cada' : '') + '</span></div>' +
+            '<div class="ca"><button type="button" class="btn primary" data-conspool="' + id + '|' + esc(c.name) + '" aria-label="Adicionar ' + esc(c.name) + ' à lista Em consideração">Adicionar</button></div></li>';
+        }).join('') + '</ul>' + (pool.length > 40 ? '<p class="xs muted">Mostrando as 40 que aparecem em mais listas.</p>' : '') + '</details>';
+    }
     return h + '</section>';
   }
   /* Acha a carta da lista pelo índice E pelo nome: se a lista mudou desde que a tela foi desenhada, não age na carta errada. */
@@ -2615,7 +2629,7 @@
     var key = location.hash;
     trackNav();
     render();
-    if (key !== lastRoute) { window.scrollTo(0, 0); main.focus({ preventScroll: true }); }
+    if (key !== lastRoute) { poolOpen = ''; window.scrollTo(0, 0); main.focus({ preventScroll: true }); }
     lastRoute = key;
   }
   window.addEventListener('hashchange', onRoute);
@@ -2682,6 +2696,17 @@
     if (t.hasAttribute('data-consrm')) {
       var rv = t.getAttribute('data-consrm').split('|'), rd = deckById(rv[0]), re = consEntry(rd, +rv[1], rv.slice(2).join('|'));
       if (re) { rd.consider.splice(+rv[1], 1); if (!rd.consider.length) delete rd.consider; rd.consNo = (rd.consNo || []).concat([re.name]).slice(-200); persist(true); var yr = window.scrollY; render(); window.scrollTo(0, yr); toast('Tirei ' + re.name + ' da lista.'); var fr = document.getElementById('csH'); if (fr) fr.focus({ preventScroll: true }); }
+      return;
+    }
+    if (t.hasAttribute('data-conspool')) {
+      var pv = t.getAttribute('data-conspool').split('|'), pd = deckById(pv[0]), pn = pv.slice(1).join('|');
+      var pc = pd && FU.considerPool(pd, canonical).filter(function (x) { return FU.key(x.name) === FU.key(pn); })[0];
+      if (pc) {
+        var pe = FU.considerAdd(pd, pc.name, pc.qty, pc.board, canonical); pe.auto = 1; pe.cnt = pc.count; pe.tot = pc.total;
+        poolOpen = pd.id; persist(true); var yp = window.scrollY; render(); window.scrollTo(0, yp);
+        toast('Em consideração: ' + pc.name + '.');
+        var pi = cardInfo(pc.name); if (!pi || !pi.typeLine) refreshPrices({ only: [pc.name], silent: true });
+      }
       return;
     }
     if (t.hasAttribute('data-conshave')) {
