@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.25.0';
+  var APP_VERSION = '0.26.0';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -2242,7 +2242,7 @@
     var spare = collectionData().filter(function (x) { return x.spare > 0; }).slice(0, 200).map(function (x) { return x.spare + ' ' + x.name; }).join('\n') || '(nenhuma)';
     return [
       'Sou jogador de Premodern (Magic: The Gathering). Meu deck é "' + d.name + '" (arquétipo ' + arch + ').',
-      'Contra ' + r.o + ', a taxa de vitória do meu arquétipo é ' + r.wr + '% em ' + r.n + ' partidas (MTG Decks, dados de ' + metaDateText(date) + '). Quero sugestões de sideboard para esse confronto.',
+      'Contra ' + r.o + (r.wr == null ? '' : ', a taxa de vitória do meu arquétipo é ' + r.wr + '% em ' + r.n + ' partidas (MTG Decks, dados de ' + metaDateText(date) + ')') + '. Quero sugestões de sideboard para esse confronto.',
       'Meu deck principal:\n' + deckLines(d, false),
       'Meu sideboard:\n' + deckLines(d, true),
       'Cartas que eu tenho fora dos decks (coleção):\n' + spare,
@@ -2252,13 +2252,24 @@
   }
   function matchupPanel(d, arch, r, date) {
     var note = FU.sideNote(arch, r.o), lookup = collLookup();
-    var h = '<div class="mu-panel"><p class="small"><strong>' + esc(arch) + ' × ' + esc(r.o) + '</strong>: ' + r.wr + '% em ' + r.n + ' partidas' + (r.n < FU.META_SMALL ? ' (amostra pequena: use como pista)' : '') + '.</p>';
+    var h = '<div class="mu-panel"><p class="small"><strong>' + esc(arch) + ' × ' + esc(r.o) + '</strong>' + (r.wr == null ? '' : ': ' + r.wr + '% em ' + r.n + ' partidas' + (r.n < FU.META_SMALL ? ' (amostra pequena: use como pista)' : '')) + '.</p>';
     if (note) {
       h += note.lines.map(function (l) { return '<p class="small">' + esc(l) + '</p>'; }).join('');
-      h += '<p class="small"><strong>Cartas que o guia sugere trazer</strong></p><ul class="mu-cards">' + note.in.map(function (n) {
-        return '<li><span class="nm">' + esc(n) + '</span> ' + noteStatusChip(FU.noteCardStatus(n, d, canonical, lookup)) + '</li>'; }).join('') + '</ul>';
-      h += '<p class="small">' + esc(note.expect) + '</p>';
-      h += '<p class="small"><span class="chip mid">Inferência</span> ' + esc(note.infer.replace(/^Inferência minha:\s*/, '')) + '</p>';
+      var qn = function (x) { return (x.q ? x.q + '× ' : '') + esc(x.name); };
+      if (note.plan) {
+        var sum = function (a) { return a.reduce(function (t, x) { return t + (x.q || 0); }, 0); };
+        h += '<p class="small"><strong>Entra</strong></p><ul class="mu-cards">' + note.plan.in.map(function (x) {
+          return '<li><span class="nm">' + qn(x) + '</span> ' + noteStatusChip(FU.noteCardStatus(x.name, d, canonical, lookup)) + '</li>'; }).join('') + '</ul>';
+        if (note.plan.out.length) h += '<p class="small"><strong>Sai</strong></p><ul class="mu-cards">' + note.plan.out.map(function (x) {
+          var st = FU.noteCardStatus(x.name, d, canonical, lookup);
+          return '<li><span class="nm">' + qn(x) + '</span> ' + (st.where === 'main' ? chip('ok', 'No seu deck principal') : chip('mid', 'Não achei no seu principal: ignore essa troca')) + '</li>'; }).join('') + '</ul>';
+        h += '<p class="xs">' + (note.partial ? 'O guia só nomeia parte das trocas, sem quantidades.' : 'Entram ' + sum(note.plan.in) + ' · saem ' + sum(note.plan.out) + '. As trocas são as do autor para a lista dele: confira com a sua.') + '</p>';
+      } else {
+        h += '<p class="small"><strong>Cartas que o guia sugere trazer</strong></p><ul class="mu-cards">' + note.in.map(function (n) {
+          return '<li><span class="nm">' + esc(n) + '</span> ' + noteStatusChip(FU.noteCardStatus(n, d, canonical, lookup)) + '</li>'; }).join('') + '</ul>';
+      }
+      if (note.expect) h += '<p class="small">' + esc(note.expect) + '</p>';
+      if (note.infer) h += '<p class="small"><span class="chip mid">Inferência</span> ' + esc(note.infer.replace(/^Inferência minha:\s*/, '')) + '</p>';
       h += '<p class="xs">Fontes: ' + note.src.map(function (s) { return '<a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.label) + '</a> (' + (s.date ? metaDateText(s.date) : 'sem data na página') + ')'; }).join(' · ') + '</p>';
     } else {
       h += '<p class="small">Ainda não tenho um guia conferido para este confronto, e não vou inventar. Peça à sua IA: o pedido já vai com o seu deck, o seu sideboard e a sua coleção.</p>';
@@ -2266,6 +2277,18 @@
     h += '<button type="button" class="btn primary full" data-muai="' + esc(d.id) + '|' + esc(r.o) + '">Pedir sugestão à IA (abre o Claude)</button>' +
       '<button type="button" class="btn full" data-mucopy="' + esc(d.id) + '|' + esc(r.o) + '">' + ICON.copy + 'Copiar o pedido</button>' +
       '<p class="xs"><a class="lnk" href="https://mtgdecks.net/Premodern/' + esc(encodeURIComponent(arch.toLowerCase().replace(/\s+/g, '-'))) + '" target="_blank" rel="noopener">Abrir ' + esc(arch) + ' no MTG Decks</a></p></div>';
+    return h;
+  }
+  /* Guias conferidos que não dependem de winrates: abrem direto, mesmo sem dados do servidor. */
+  function guideRows(d, arch, skip, title) {
+    var opps = FU.sideNotesFor(arch).filter(function (o) { return !skip[o]; });
+    if (!opps.length) return '';
+    var h = '<h3 class="small" style="margin-top:8px"><strong>' + esc(title) + '</strong></h3>';
+    opps.forEach(function (o) {
+      var id = d.id + '|' + o, open = !!muOpen[id];
+      h += '<button type="button" class="mu-row" data-mu="' + esc(id) + '" aria-expanded="' + open + '"><span class="o">' + esc(o) + '</span><span class="w">Guia</span>' +
+        '<span class="s">sem winrate · toque para ver o plano de sideboard</span></button>' + (open ? matchupPanel(d, arch, { o: o, wr: null, n: null }, null) : '');
+    });
     return h;
   }
   function matchupCard(d) {
@@ -2278,7 +2301,10 @@
       FU.META_ARCHS.map(function (a) { return '<option' + (d.arch === a ? ' selected' : '') + '>' + esc(a) + '</option>'; }).join('') + '</select></details>';
     var e = arch ? FU.metaEntry(state.meta, arch) : null;
     if (!arch) return h + '</section>';
-    if (!e) return h + '<p class="small">Ainda sem winrates para <strong>' + esc(arch) + '</strong>.</p><a class="btn primary full" href="#/meta">Importar winrates</a></section>';
+    if (!e) {
+      var only = guideRows(d, arch, {}, 'Guias de sideboard conferidos');
+      return h + (only ? '<p class="small">Ainda sem winrates para <strong>' + esc(arch) + '</strong>, mas já há guias conferidos por confronto:</p>' + only : '<p class="small">Ainda sem winrates para <strong>' + esc(arch) + '</strong>.</p>') + '<a class="btn' + (only ? '' : ' primary') + ' full" href="#/meta">Importar winrates</a></section>';
+    }
     var age = FU.metaAgeDays(e.date), sp = FU.metaSplit(e.rows), asc = !state.ui.muBest;
     h += '<p class="small" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">Dados de <strong>' + esc(metaDateText(e.date)) + '</strong> · ' + esc(e.source || 'MTG Decks') +
       (age != null && age > FU.META_STALE_DAYS ? '<span class="seal warn">' + ICO_WARN + 'Desatualizado (' + age + ' dias)</span>' : '') + '</p>';
@@ -2296,7 +2322,8 @@
     }
     if (sp.few.length) h += '<details class="small"><summary style="min-height:44px;display:flex;align-items:center;cursor:pointer">' + sp.few.length + (sp.few.length === 1 ? ' confronto' : ' confrontos') + ' com poucos dados (menos de ' + FU.META_MIN + ' partidas)</summary><ul style="padding-left:20px">' +
       sp.few.map(function (r) { return '<li>' + esc(r.o) + ': ' + r.wr + '% em ' + r.n + ' partidas</li>'; }).join('') + '</ul></details>';
-    return h + '<a class="btn full" href="#/meta">Importar winrates</a></section>';
+    var shown = {}; sp.ok.forEach(function (r) { shown[r.o] = true; });
+    return h + guideRows(d, arch, shown, 'Outros guias conferidos (sem winrate)') + '<a class="btn full" href="#/meta">Importar winrates</a></section>';
   }
 
   /* ---------- roteamento ---------- */
@@ -2486,8 +2513,9 @@
       var mv = (t.getAttribute('data-muai') || t.getAttribute('data-mucopy')).split('|'), md = deckById(mv[0]);
       var ma = md ? archOf(md) : '', me = ma ? FU.metaEntry(state.meta, ma) : null;
       var mr = me && me.rows.filter(function (r) { return r.o === mv.slice(1).join('|'); })[0];
+      if (!mr && md && ma) mr = { o: mv.slice(1).join('|'), wr: null, n: null };
       if (!mr) return;
-      var mp = matchupAiPrompt(md, ma, mr, me.date);
+      var mp = matchupAiPrompt(md, ma, mr, me ? me.date : null);
       if (t.hasAttribute('data-muai')) openAi(AIS[0], mp, 'Pedido copiado. Se a IA abrir vazia, é só colar.'); else copyText(mp, 'Pedido copiado. Cole na sua IA.');
       return;
     }

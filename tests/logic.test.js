@@ -98,3 +98,34 @@ test('regressão: funções de OCR foram removidas da API pública', () => {
   assert.equal(FU.cleanOcr, undefined);
   assert.equal(FU.parseMetaImage, undefined);
 });
+
+test('planList lê quantidades e aceita nomes sem quantidade', () => {
+  assert.deepEqual(FU.planList('4 Meddling Mage, 1 Disenchant'), [{ q: 4, name: 'Meddling Mage' }, { q: 1, name: 'Disenchant' }]);
+  assert.deepEqual(FU.planList('Compost, Waterfront Bouncer'), [{ q: null, name: 'Compost' }, { q: null, name: 'Waterfront Bouncer' }]);
+  assert.deepEqual(FU.planList(''), []);
+});
+
+test('guias do Landstill: todo plano completo tem o mesmo número de cartas entrando e saindo, com fonte e data', () => {
+  const opps = FU.sideNotesFor('Landstill');
+  assert.ok(opps.length >= 15);
+  opps.forEach((o) => {
+    const n = FU.sideNote('Landstill', o);
+    const a = n.plan.in.reduce((t, x) => t + x.q, 0), b = n.plan.out.reduce((t, x) => t + x.q, 0);
+    assert.equal(a, b, 'plano desbalanceado contra ' + o);
+    assert.ok(n.src.length && n.src[0].url && n.src[0].date, 'sem fonte/data: ' + o);
+    assert.ok(n.lines.length && n.lines[0].length > 20);
+  });
+});
+
+test('guias do Madness são parciais: sem quantidades inventadas e sem lista de saídas', () => {
+  FU.sideNotesFor('Madness').forEach((o) => {
+    const n = FU.sideNote('Madness', o);
+    assert.equal(n.partial, true);
+    assert.deepEqual(n.plan.out, []);
+    n.plan.in.forEach((x) => assert.equal(x.q, null));
+  });
+});
+
+test('sideNotesFor devolve vazio para arquétipo sem guia', () => {
+  assert.deepEqual(FU.sideNotesFor('Psychatog'), []);
+});

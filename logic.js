@@ -629,6 +629,48 @@
       ]
     }
   };
+  /* Plano de sideboard em lista: "4 Meddling Mage, 1 Exalted Angel" -> [{q:4, name:'Meddling Mage'}, ...] */
+  function planList(str) {
+    return String(str || '').split(',').map(function (x) {
+      var m = /^\s*(?:(\d+)\s+)?(.+?)\s*$/.exec(x); return m && m[2] ? { q: m[1] ? +m[1] : null, name: m[2] } : null;
+    }).filter(Boolean);
+  }
+  /* Guias conferidos na fonte (20/11/2026). Texto em palavras próprias; trocas e quantidades são as do autor. */
+  var LS_SRC = [{ label: 'Metagame.info: guia de UW Landstill (Alessandro Galli; publicado em 11/05/2026, revisado em 16/10/2026)', url: 'https://metagame.info/en-us/mtg/articles/uw-landstill-the-complete-deck-and-sideboard-guide', date: '2026-10-16' }];
+  function ls(opp, inS, outS, why) { SIDE_NOTES['Landstill|' + opp] = { plan: { in: planList(inS), out: planList(outS) }, lines: [why], src: LS_SRC }; }
+  ls('Stiflenought', '4 Meddling Mage, 1 Exalted Angel, 1 Disenchant', '2 Wrath of God, 1 Humility, 1 Swords to Plowshares, 1 Mana Leak, 1 Dust Bowl', 'Costuma ter uma ameaça só: o Meddling Mage nomeia as peças-chave e o Exalted Angel vira o finalizador. Humility perde valor depois do sideboard porque ele tem Chain of Vapor.');
+  ls('Burn', '4 Hydroblast, 2 Circle of Protection: Red, 2 Exalted Angel', '2 Wrath of God, 1 Humility, 1 Decree of Justice, 1 Fact or Fiction, 1 Counterspell, 1 Phyrexian Furnace, 1 Dust Bowl', 'Ganhe tempo com proteção barata contra vermelho e estabilize com o Exalted Angel. Fact or Fiction e Decree são lentos demais contra esse plano.');
+  ls('Goblins', '4 Hydroblast, 2 Circle of Protection: Red, 2 Exalted Angel, 2 Teferi\'s Response', '2 Phyrexian Furnace, 1 Annul, 2 Disenchant, 1 Fact or Fiction, 1 Decree of Justice, 1 Mana Leak, 1 Counterspell, 1 Standstill', 'Hydroblast cuida das criaturas baratas, Circle segura o dano vermelho e Teferi\'s Response pune Wasteland e Rishadan Port. Standstill e contramágicas fracas não seguram um tabuleiro rápido.');
+  ls('Enchantress', '4 Meddling Mage, 1 Disenchant', '1 Wrath of God, 2 Swords to Plowshares, 1 Mana Leak, 1 Powder Keg', 'O Meddling Mage é a melhor carta aqui: nomeie os motores deles (Presence, Argothian Enchantress, Opalescence ou Parallax Wave). Disenchant ajuda contra Xantid Swarm e o resto dos encantamentos.');
+  ls('Replenish', '4 Meddling Mage, 1 Disenchant, 1 Exalted Angel', '2 Wrath of God, 2 Swords to Plowshares, 1 Humility, 1 Powder Keg', 'Wrath, Swords, Humility e Keg ficam quase mortos contra um tabuleiro de encantamentos. O Mage trava os habilitadores e o pagamento do Replenish.');
+  ls('Landstill', '4 Meddling Mage, 2 Exalted Angel, 2 Teferi\'s Response', '2 Wrath of God, 1 Humility, 3 Standstill, 2 Phyrexian Furnace', 'Standstill é arriscado no espelho porque a vantagem muda rápido de lado. Teferi\'s Response protege suas manlands e responde ao Dust Bowl; o Angel dá densidade de ameaça.');
+  ls('UW Control', '3 Meddling Mage, 2 Exalted Angel, 2 Teferi\'s Response', '2 Wrath of God, 1 Humility, 2 Standstill, 2 Swords to Plowshares', 'Aqui o Standstill é mais confiável, porque o outro lado não tem manlands nem Dust Bowl. Mage e Angel dão pressão e disrupção num jogo de desgaste.');
+  ls('Terrageddon', '2 Exalted Angel, 2 Teferi\'s Response', '3 Standstill, 1 Mana Leak', 'Standstill não segura manlands, destruição de terrenos e ameaças grandes. O Angel é a ameaça principal e Teferi\'s Response pode virar o jogo contra um Port cedo.');
+  ls('Oath Ponza', '2 Exalted Angel, 2 Teferi\'s Response, 1 Disenchant', '1 Wrath of God, 1 Humility, 3 Standstill', 'Standstill vai mal contra Wasteland, Port e manlands. Angel e Teferi\'s Response são as respostas principais ao plano de negar mana.');
+  ls('Devourer Combo', '4 Meddling Mage, 3 Hydroblast, 1 Disenchant', '2 Wrath of God, 2 Swords to Plowshares, 1 Decree of Justice, 2 Phyrexian Furnace, 1 Mana Leak', 'O Mage nomeia Tinker ou outra peça do combo; Hydroblast e Disenchant cuidam do Devourer e das peças de Stax. A maior parte da remoção do principal rende pouco aqui.');
+  ls('Full English Breakfast', '4 Meddling Mage, 1 Disenchant', '2 Wrath of God, 2 Decree of Justice, 1 Powder Keg', 'O Mage é a ferramenta principal contra as linhas de combo: nomeie a criatura-chave ou o Survival of the Fittest. O autor avisa que Furnace é fraco aqui e Humility é forte.');
+  ls('Stasis', '4 Meddling Mage, 1 Disenchant, 2 Exalted Angel', '2 Wrath of God, 4 Swords to Plowshares, 1 Humility', 'A remoção fica quase toda morta. O Mage pode nomear Chain of Vapor e depois Stasis, e o Angel serve mais como ameaça que o Wrath.');
+  ls('Elves', '2 Exalted Angel, 1 Disenchant', '2 Mana Leak, 1 Decree of Justice', 'Mana Leak rende pouco contra criaturas de mana e Gaea\'s Cradle. O Angel fecha o jogo depois que o tabuleiro estabiliza e o Disenchant resolve o Survival.');
+  ls('Psychatog', '4 Meddling Mage, 2 Exalted Angel', '2 Wrath of God, 1 Humility, 2 Mana Leak, 1 Powder Keg', 'O Psychatog costuma ser a única forma de ganhar deles, então o confronto é controlável. Humility é forte, mas difícil de resolver pelas contramágicas deles. Observe depois do sideboard: Tsabo\'s Web, um Zombie Infestation e Haunting Echoes.');
+  ls('Mono Black', '2 Exalted Angel, 1 Teferi\'s Response', '2 Mana Leak, 1 Counterspell', 'O autor chama esse adversário de Moneyball Black. A troca é pequena: contramágicas saem e entram ameaças que resistem ao desgaste.');
+  ls('Madness', '2 Exalted Angel', '2 Disenchant', 'Troca pequena: Disenchant rende pouco aqui e o Angel dá uma ameaça que eles têm dificuldade de remover.');
+  ls('BG The Rock', '2 Exalted Angel, 1 Disenchant', '2 Mana Leak, 1 Counterspell', 'Contramágicas saem e entram o Angel e o Disenchant, para disputar o jogo longo.');
+  ls('BW Control', '4 Meddling Mage, 2 Exalted Angel, 2 Teferi\'s Response', '2 Wrath of God, 1 Humility, 2 Swords to Plowshares, 3 Standstill', 'Jogo de desgaste: Mage e Angel entram como disrupção e pressão, e a remoção e o Standstill saem.');
+  ls('Blue Storm', '4 Meddling Mage, 2 Exalted Angel, 1 Disenchant', '2 Wrath of God, 1 Humility, 4 Swords to Plowshares', 'A remoção fica morta contra Storm. O Mage nomeia as peças-chave e o Angel é a ameaça.');
+
+  var MD_SRC = [{ label: 'Cardsrealm: guia de Simic Madness (sem data na página; as listas completas de entra e sai são imagens)', url: 'https://mtg.cardsrealm.com/en-us/p/239973', date: null }];
+  /* O guia de Madness só nomeia as cartas no texto (as listas são imagens): sem quantidades, sem lista de saídas. */
+  function md(opp, inS, why) { SIDE_NOTES['Madness|' + opp] = { partial: true, plan: { in: planList(inS), out: [] }, lines: [why], src: MD_SRC }; }
+  md('Goblins', 'Hydroblast', 'Ganhe o tabuleiro cedo e use Hydroblast e Daze para atrasar os turnos dele. Não exagere nas ameaças.');
+  md('Burn', 'Naturalize', 'Proteja o seu total de vida e pressione o tabuleiro. Naturalize responde ao alcance dele, como Sulfuric Vortex e Cursed Scroll.');
+  md('Psychatog', 'Compost, Waterfront Bouncer', 'Compost pune as remoções principais dele e o Waterfront Bouncer atrai remoção para longe das suas ameaças.');
+  md('Mono Black', 'Compost', 'Compost é a melhor carta do confronto. Mantenha Phyrexian Arena fora do jogo e sequencie as ameaças com cuidado, porque a maioria será removida.');
+  md('Enchantress', 'Naturalize, Tranquil Domain', 'Você precisa de espaço para Naturalize e Tranquil Domain contra os encantamentos dele.');
+
+  function sideNotesFor(arch) {
+    var pre = arch + '|';
+    return Object.keys(SIDE_NOTES).filter(function (k) { return k.indexOf(pre) === 0; }).map(function (k) { return k.slice(pre.length); });
+  }
   function sideNote(arch, opp) { return SIDE_NOTES[arch + '|' + opp] || null; }
 
   /* Onde está cada carta sugerida: no sideboard, no principal, na coleção ou "você não tem".
@@ -650,7 +692,7 @@
   var api = {
     META_MIN: META_MIN, META_SMALL: META_SMALL, META_STALE_DAYS: META_STALE_DAYS, META_ARCHS: META_ARCHS,
     suggestArch: suggestArch, parseMeta: parseMeta, parseMetaTable: parseMetaTable, b64urlDecode: b64urlDecode, b64urlEncode: b64urlEncode,
-    metaEntry: metaEntry, metaSplit: metaSplit, metaAgeDays: metaAgeDays, sideNote: sideNote, noteCardStatus: noteCardStatus,
+    metaEntry: metaEntry, metaSplit: metaSplit, metaAgeDays: metaAgeDays, sideNote: sideNote, sideNotesFor: sideNotesFor, planList: planList, noteCardStatus: noteCardStatus,
     parsePriceBR: parsePriceBR, parseLigaPrices: parseLigaPrices,
     edsSum: edsSum, edsMerge: edsMerge, edsTake: edsTake, edsPop: edsPop,
     splitSource: splitSource, markOwned: markOwned,
