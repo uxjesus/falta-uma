@@ -129,3 +129,85 @@ test('guias do Madness são parciais: sem quantidades inventadas e sem lista de 
 test('sideNotesFor devolve vazio para arquétipo sem guia', () => {
   assert.deepEqual(FU.sideNotesFor('Psychatog'), []);
 });
+
+test('parseGuide lê um confronto, ignora conversa e cercas de código, e guarda ILEGIVEL à parte', () => {
+  const r = FU.parseGuide('Claro, aqui vai:\n```\nADVERSÁRIO: Burn\nENTRA:\n- 4x Hydroblast\n2 Circle of Protection: Red\nSAI:\n2 Wrath of God\nILEGIVEL\nNOTAS:\n- Estabilize cedo\nFONTE: Fulano, site, 01/01/2026\n```');
+  assert.equal(r.primer, null);
+  assert.equal(r.guides.length, 1);
+  const g = r.guides[0];
+  assert.equal(g.opp, 'Burn');
+  assert.deepEqual(g.in, [{ q: 4, name: 'Hydroblast' }, { q: 2, name: 'Circle of Protection: Red' }]);
+  assert.deepEqual(g.out, [{ q: 2, name: 'Wrath of God' }]);
+  assert.deepEqual(g.notes, ['Estabilize cedo']);
+  assert.equal(g.src, 'Fulano, site, 01/01/2026');
+  assert.equal(g.unreadable.length, 1);
+  assert.equal(r.ignored, 1);
+});
+
+test('parseGuide sem ADVERSARIO vira o "Como jogar" do deck; vários confrontos viram vários guias', () => {
+  const p = FU.parseGuide('NOTAS:\n- Mulligan agressivo\n- Combo X\nFONTE: Autor');
+  assert.equal(p.guides.length, 0);
+  assert.deepEqual(p.primer.notes, ['Mulligan agressivo', 'Combo X']);
+  const m = FU.parseGuide('ADVERSARIO: A\nENTRA:\n1 Foo\nSAI:\n1 Bar\nADVERSARIO: B\nENTRA:\n1 Baz, 2 Qux\n');
+  assert.deepEqual(m.guides.map((g) => g.opp), ['A', 'B']);
+  assert.deepEqual(m.guides[1].in, [{ q: 1, name: 'Baz' }, { q: 2, name: 'Qux' }]);
+});
+
+test('parseGuide: texto sem o formato e linha de nota que começa com "Contra" não viram cabeçalho', () => {
+  const x = FU.parseGuide('Não consegui ler o print, desculpe.');
+  assert.equal(x.primer, null); assert.equal(x.guides.length, 0);
+  const n = FU.parseGuide('NOTAS:\nContra aggro: jogue devagar\n- outra dica');
+  assert.equal(n.primer.notes.length, 2);
+});
+
+test('guideTotals: confere se o que entra bate com o que sai e sabe quando falta quantidade', () => {
+  assert.deepEqual(FU.guideTotals({ in: [{ q: 2 }], out: [{ q: 2 }] }), { in: 2, out: 2, known: true, balanced: true });
+  assert.equal(FU.guideTotals({ in: [{ q: 3 }], out: [{ q: 2 }] }).balanced, false);
+  const u = FU.guideTotals({ in: [{ q: null }], out: [] });
+  assert.equal(u.known, false); assert.equal(u.balanced, false);
+});
+
+test('guidePrompt leva o deck, o formato e as regras de não inventar', () => {
+  const p = FU.guidePrompt({ name: 'W Control', arch: 'Landstill', format: 'Premodern', main: '4 Counterspell', side: '2 Disenchant' });
+  ['W Control', 'Landstill', '4 Counterspell', '2 Disenchant', 'ADVERSARIO:', 'ENTRA:', 'SAI:', 'NOTAS:', 'FONTE:', 'ILEGIVEL', 'Não invente'].forEach((k) => assert.ok(p.includes(k), 'falta ' + k));
+});
+
+test('parseGuide: "COMO JOGAR:" abre o primer mesmo depois de um confronto, na mesma resposta', () => {
+  const r = FU.parseGuide('ADVERSARIO: Burn\nENTRA:\n1 Foo\nNOTAS:\n- dica do confronto\nFONTE: A\nCOMO JOGAR:\n- mulligan\n- combo\nFONTE: B');
+  assert.equal(r.guides.length, 1);
+  assert.deepEqual(r.guides[0].notes, ['dica do confronto']);
+  assert.equal(r.guides[0].src, 'A');
+  assert.deepEqual(r.primer.notes, ['mulligan', 'combo']);
+  assert.equal(r.primer.src, 'B');
+});
+
+test('parseGuide: nomes de carta com vírgula ficam inteiros; várias cartas na linha só se cada uma tiver quantidade', () => {
+  const r = FU.parseGuide('ADVERSARIO: A\nENTRA:\n1 Akroma, Angel of Wrath\n2 Urza, Lord Protector\n1 Teferi\'s Response, 2 Annul\nSAI:\n1 Jace, the Mind Sculptor');
+  assert.deepEqual(r.guides[0].in.map((x) => x.name), ['Akroma, Angel of Wrath', 'Urza, Lord Protector', "Teferi's Response", 'Annul']);
+  assert.equal(r.guides[0].out[0].name, 'Jace, the Mind Sculptor');
+});
+
+test('parseGuide: ENTRA/SAI sem ADVERSARIO não viram primer vazio', () => {
+  const r = FU.parseGuide('ENTRA:\n1 A\nSAI:\n1 B');
+  assert.equal(r.primer, null); assert.equal(r.guides.length, 0); assert.equal(r.errors.length, 1);
+});
+
+test('parseGuide: sufixo (tenho N), cabeçalho com contagem, x4, quantidades absurdas, tabela markdown', () => {
+  const r = FU.parseGuide('ADVERSARIO: A\nENTRA (4):\nx4 Hydroblast\n2 Annul (tenho 2)\n| 3 | Disenchant |\n|---|---|\n0 Foo\n99999999999 Bar\nSAI (2):\n2 Wrath of God\nObs:');
+  const i = r.guides[0].in;
+  assert.deepEqual(i.slice(0, 3), [{ q: 4, name: 'Hydroblast' }, { q: 2, name: 'Annul' }, { q: 3, name: 'Disenchant' }]);
+  assert.equal(i[3].q, null); assert.equal(i[4].q, null);
+  assert.equal(r.guides[0].out.length, 1);
+});
+
+test('parseGuide: adversário repetido (caixa diferente) vira um só; nomes perigosos de objeto são renomeados', () => {
+  const r = FU.parseGuide('ADVERSARIO: Burn\nENTRA:\n1 A\nADVERSARIO: burn\nENTRA:\n2 B\nADVERSARIO: __proto__\nNOTAS:\n- x');
+  assert.equal(r.guides.length, 2); assert.equal(r.dupes, 1);
+  assert.deepEqual(r.guides[0].in, [{ q: 2, name: 'B' }]);
+  assert.ok(!/^__proto__$/i.test(r.guides[1].opp));
+});
+
+test('primer e guias sobrevivem a JSON (backup/restauração)', () => {
+  const d = { primer: { lines: ['a'], src: 's', at: 1 }, mu: { Burn: { plan: { in: [{ q: 1, name: 'A' }], out: [] }, lines: [], src: [{ label: 'x' }], partial: false, unreadable: 0, at: 1 } } };
+  assert.deepEqual(JSON.parse(JSON.stringify(d)), d);
+});

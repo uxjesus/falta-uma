@@ -689,10 +689,79 @@
     return { name: name, where: 'nao', have: 0 };
   }
 
+  /* Importar guia pela IA da pessoa: o app gera o pedido, a IA devolve texto neste formato (ADVERSARIO / ENTRA / SAI / NOTAS / FONTE)
+     e o app lê com tolerância e mostra uma prévia antes de salvar. Sem ADVERSARIO, o bloco é o "Como jogar" do deck. */
+  function noAcc(s) { return String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim(); }
+  var GUIDE_HEADS = { adversario: 'adv', entra: 'in', entram: 'in', sai: 'out', saem: 'out', nota: 'notes', notas: 'notes', 'como jogar': 'primer', primer: 'primer', fonte: 'src', fontes: 'src' };
+  function guideCard(raw) {
+    var t = String(raw);
+    if (/^\s*\|/.test(t)) t = t.split('|').map(function (x) { return x.trim(); }).filter(Boolean).join(' ');
+    t = t.replace(/^\s*[-*•·]\s*/, '').replace(/\*\*/g, '').replace(/\s*\|.*$/, '').replace(/\s*\((?:tenho|have)[^)]*\)\s*$/i, '').trim();
+    if (!t || /^[-:\s]+$/.test(t) || /:$/.test(t) || t.split(/\s+/).length > 8) return null;
+    if (/ileg[ií]vel/i.test(t)) return { bad: t };
+    var m = /^[x×]?\s*(\d{1,2})\s*[x×]?\s+(.+?)$/i.exec(t);
+    return m && +m[1] > 0 ? { q: +m[1], name: m[2].trim() } : { q: null, name: t };
+  }
+  function parseGuide(text) {
+    var lines = String(text || '').replace(/\r/g, '').split('\n'), blocks = [], cur = null, sec = null, ignored = 0;
+    function block(opp) { opp = opp && /^(__proto__|constructor|prototype|tostring|hasownproperty|valueof)$/i.test(opp.trim()) ? 'Adversário ' + opp.trim() : opp; cur = { opp: opp || null, in: [], out: [], notes: [], src: '', unreadable: [] }; blocks.push(cur); sec = null; }
+    function addCards(list, chunk) {
+      String(chunk).split(/\s*,\s*(?=\d{1,2}\s*[x×]?\s+\S)/).forEach(function (x) {
+        var c = guideCard(x); if (!c) return;
+        if (c.bad) cur.unreadable.push(c.bad); else list.push(c);
+      });
+    }
+    lines.forEach(function (ln) {
+      if (/^\s*```/.test(ln)) return;
+      var t = ln.replace(/\*\*/g, '').replace(/^\s*#+\s*/, '');
+      if (!t.trim()) return;
+      var h = /^\s*([A-Za-zÀ-ÿ ]{2,20}?)\s*(?:\([^)]*\))?\s*:\s*(.*)$/.exec(t), kind = h ? GUIDE_HEADS[noAcc(h[1])] : null, rest = h ? h[2].trim() : '';
+      if (kind === 'adv') { block(rest); return; }
+      if (kind === 'primer') { block(null); sec = 'notes'; if (rest) cur.notes.push(rest); return; }
+      if (kind) {
+        if (!cur) block(null);
+        sec = kind;
+        if (rest) { if (kind === 'src') cur.src = rest; else if (kind === 'notes') cur.notes.push(rest); else addCards(cur[kind], rest); }
+        return;
+      }
+      if (!cur || !sec) { ignored++; return; }
+      if (sec === 'src') cur.src = (cur.src ? cur.src + ' ' : '') + t.trim();
+      else if (sec === 'notes') { var n = t.replace(/^\s*[-*•·]\s*/, '').trim(); if (n) cur.notes.push(n); }
+      else addCards(cur[sec], t);
+    });
+    var primer = null, guides = [], errors = [], dupes = 0, at = {};
+    blocks.forEach(function (b) {
+      var empty = !b.in.length && !b.out.length && !b.notes.length;
+      if (empty) return;
+      if (b.opp) {
+        var k = noAcc(b.opp);
+        if (at[k] != null) { guides[at[k]] = b; dupes++; } else { at[k] = guides.length; guides.push(b); }
+      } else if (!b.notes.length) errors.push('Achei ENTRA ou SAI sem ADVERSARIO. Peça à IA para incluir a linha ADVERSARIO: com o nome do confronto.');
+      else if (!primer) primer = b;
+      else { primer.notes = primer.notes.concat(b.notes); primer.src = primer.src || b.src; primer.unreadable = primer.unreadable.concat(b.unreadable); }
+    });
+    var cut = Math.max(0, guides.length - 30); guides = guides.slice(0, 30);
+    return { primer: primer, guides: guides, ignored: ignored, errors: errors, dupes: dupes, cut: cut };
+  }
+  function guideTotals(b) {
+    var sum = function (a) { return a.reduce(function (t, x) { return t + (x.q || 0); }, 0); };
+    var known = b.in.concat(b.out).every(function (x) { return x.q != null; });
+    return { in: sum(b.in), out: sum(b.out), known: known && (b.in.length + b.out.length) > 0, balanced: known && sum(b.in) === sum(b.out) };
+  }
+  function guidePrompt(o) {
+    return [
+      'Leia o print anexo. Ele é parte de um guia do meu deck de Magic: The Gathering (' + (o.format || 'formato não informado') + '), "' + o.name + '"' + (o.arch ? ' (arquétipo ' + o.arch + ')' : '') + '.',
+      'Devolva SOMENTE o bloco abaixo, dentro de UM bloco de código (três crases), para eu tocar no botão de copiar. Sem explicação fora dele.',
+      'Formato:\nADVERSARIO: <arquétipo que enfrento>\nENTRA:\n<quantidade> <carta>\nSAI:\n<quantidade> <carta>\nNOTAS:\n- <dica curta>\nFONTE: <autor, site e data que aparecem no print>',
+      'Regras:\n1. Se o print for um guia contra um adversário específico, preencha ADVERSARIO, ENTRA e SAI. Se tiver vários confrontos, repita o bloco inteiro para cada um.\n2. Se o print for um texto de como jogar o deck (plano de jogo, mulligan, combos), NÃO use ADVERSARIO, ENTRA nem SAI: escreva só NOTAS e FONTE.\n3. Não invente nada. Se algo estiver ilegível, escreva ILEGIVEL no lugar. Se o print não mostrar a quantidade, deixe sem número.\n4. NOTAS em português, com as suas palavras, em tópicos curtos. Não copie frases inteiras do texto original.\n5. Use os nomes exatos da lista do meu deck quando a carta estiver nela.',
+      'LISTA DO MEU DECK\nPrincipal:\n' + o.main + '\nSideboard:\n' + o.side
+    ].join('\n\n');
+  }
+
   var api = {
     META_MIN: META_MIN, META_SMALL: META_SMALL, META_STALE_DAYS: META_STALE_DAYS, META_ARCHS: META_ARCHS,
     suggestArch: suggestArch, parseMeta: parseMeta, parseMetaTable: parseMetaTable, b64urlDecode: b64urlDecode, b64urlEncode: b64urlEncode,
-    metaEntry: metaEntry, metaSplit: metaSplit, metaAgeDays: metaAgeDays, sideNote: sideNote, sideNotesFor: sideNotesFor, planList: planList, noteCardStatus: noteCardStatus,
+    metaEntry: metaEntry, metaSplit: metaSplit, metaAgeDays: metaAgeDays, sideNote: sideNote, sideNotesFor: sideNotesFor, planList: planList, noteCardStatus: noteCardStatus, parseGuide: parseGuide, noAcc: noAcc, guideTotals: guideTotals, guidePrompt: guidePrompt,
     parsePriceBR: parsePriceBR, parseLigaPrices: parseLigaPrices,
     edsSum: edsSum, edsMerge: edsMerge, edsTake: edsTake, edsPop: edsPop,
     splitSource: splitSource, markOwned: markOwned,

@@ -9,7 +9,7 @@
   var STALE_MS = 6 * 60 * 60 * 1000;
   var BACKUP_NAG_DAYS = 14;
   var DATA_VERSION = 2; // sobe quando o app passa a guardar campos novos da carta
-  var APP_VERSION = '0.26.0';
+  var APP_VERSION = '0.27.0';
   var SNAP_KEY = 'fu.snap.v1'; var SYNC_KEY = 'fu.sync.v1'; var SYNC_URL = 'https://playset-backup.sr-carjes.workers.dev/';
   var VER_KEY = 'fu.appver';
 
@@ -48,7 +48,7 @@
   var state = load(STATE_KEY, null) || { decks: [], lastBackup: null, changedAt: null };
   state.ui = state.ui || { sort: 'name', deck: 'all', view: {} };
   var db = load(CARDS_KEY, null) || { cards: {}, alias: {}, updatedAt: null, rate: null };
-  function persist(changed) { if (changed) state.changedAt = Date.now(); save(STATE_KEY, state); if (changed) scheduleSync(); }
+  function persist(changed) { if (changed) state.changedAt = Date.now(); var ok = save(STATE_KEY, state); if (changed) scheduleSync(); return ok; }
   function persistDb() { db.v = DATA_VERSION; save(CARDS_KEY, db); }
 
   function cardInfo(name) {
@@ -952,6 +952,7 @@
         '<label for="ownIn" class="visually-hidden">Cartas que eu tenho</label><textarea id="ownIn" aria-describedby="ownh" spellcheck="false" autocapitalize="off" style="min-height:180px;margin-top:12px"></textarea>' +
         '<button class="btn primary full" data-ownapply style="margin-top:12px">Marcar no deck</button>';
     }
+    else if (type === 'guide') { guideDraft = null; var gd = deckById(ctx); html = gd ? guideInputHtml(gd) : '<p>Deck não encontrado.</p>'; }
     sheetBody.innerHTML = html;
     if (!sheet.open) sheet.showModal();
   }
@@ -959,6 +960,36 @@
     var t = e.target.closest('button');
     if (!t || !sheetCtx) return;
     var ctx = sheetCtx.ctx;
+    if (sheetCtx.type === 'guide') {
+      var gdk = deckById(ctx);
+      if (!gdk) return;
+      if (t.hasAttribute('data-gcopy')) { copyText(FU.guidePrompt(guideDeckInfo(gdk)), 'Pedido copiado. Cole na sua IA e anexe o print.'); return; }
+      if (t.hasAttribute('data-gai')) { openAi(AIS[0], FU.guidePrompt(guideDeckInfo(gdk)), 'Pedido copiado. Se a IA abrir vazia, é só colar e anexar o print.'); return; }
+      if (t.hasAttribute('data-gcheck')) {
+        var gin = document.getElementById('gIn'), gmsg = document.getElementById('gMsg');
+        guideText = gin.value; gin.removeAttribute('aria-invalid');
+        var bad = function (m) { gmsg.textContent = m; gin.setAttribute('aria-invalid', 'true'); gin.focus(); };
+        if (!guideText.trim()) { bad('Cole primeiro a resposta da IA.'); return; }
+        if (guideText.length > 100000) { bad('Texto grande demais. Cole só a resposta da IA, sem o resto da conversa.'); return; }
+        var gp = FU.parseGuide(guideText), skipped = 0;
+        if (gdk.format !== 'Premodern' && gp.guides.length) { skipped = gp.guides.length; gp.guides = []; }
+        gp.skipped = skipped;
+        if (!gp.primer && !gp.guides.length && !skipped) { bad(gp.errors.length ? gp.errors[0] : 'Não achei nenhum bloco no formato (ADVERSARIO, ENTRA, SAI, NOTAS). Peça à IA para devolver só o bloco, ou cole de novo.'); return; }
+        guideDraft = gp; sheetBody.innerHTML = guidePreviewHtml(gdk, gp);
+        var f1 = document.getElementById('sheetTitle'); if (f1) f1.focus();
+        return;
+      }
+      if (t.hasAttribute('data-gback')) { sheetBody.innerHTML = guideInputHtml(gdk); var f2 = document.getElementById('gIn'); if (f2) f2.focus(); return; }
+      if (t.hasAttribute('data-gsave')) {
+        if (!guideDraft) return;
+        guideSave(gdk, guideDraft); guideDraft = null; guideText = '';
+        var saved = persist(true); sheet.close();
+        var ys = window.scrollY; render(); window.scrollTo(0, ys);
+        var fh = document.getElementById('pmH') || document.getElementById('ugH'); if (fh) fh.focus({ preventScroll: true });
+        if (saved) toast('Guia salvo no deck.');
+        return;
+      }
+    }
     if (t.hasAttribute('data-set')) {
       var k = t.getAttribute('data-set'), v = t.getAttribute('data-val');
       if (k === 'fmt') { state.ui.fmt = v; state.ui.deck = 'all'; }
@@ -1149,10 +1180,12 @@
       return html + '<div class="card pad stack" style="margin:16px"><p><strong>Seu deck ainda não tem cartas.</strong></p><p class="muted small">Use a Pesquisa para juntar listas de referência e escolher o que entra, busque cartas abaixo, ou edite o deck e cole uma lista.</p>' +
         '<button class="btn primary full" data-dtab="research">Abrir Pesquisa</button></div>' + addCardHtml(d);
     }
+    html += primerHtml(d);
     html += toolsBar([
       toolBtn('data-sheet="export" data-ctx="' + esc(d.id) + '"', ICO.exp, 'Exportar'),
       toolBtn('data-sheet="owned" data-ctx="' + esc(d.id) + '"', svg('<path d="M9 11l3 3 8-8"/><path d="M20 12v7a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h11"/>'), 'Marcar o que eu tenho colando uma lista'),
       toolBtn('data-photo="' + esc(d.id) + '"', ICO.cam, 'Importar por foto'),
+      toolBtn('data-guide="' + esc(d.id) + '"', svg('<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5"/>'), 'Importar guia ou como jogar, pela sua IA'),
       toolBtn('data-buy="' + esc(d.id) + '"' + (miss ? '' : ' disabled'), svg('<path d="M6 6h15l-1.5 9h-12z"/><path d="M6 6 5 3H2"/><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/>'), 'Comprar: copiar o que falta para a Liga Magic')
     ], d.id, '<a class="ib" href="#/editar/' + esc(d.id) + '" aria-label="Editar deck" title="Editar deck" style="color:var(--accent)">' + ICON.edit + '</a>');
     if (onlyMiss) html += '<p class="chipline"><span>Mostrando só o que falta</span><button class="link" data-clearmiss>Mostrar todas</button></p>';
@@ -2250,30 +2283,39 @@
       'Regras:\n1. Diga o que TIRAR e o que COLOCAR, mantendo 60 cartas no principal e 15 no sideboard.\n2. Use SÓ cartas do meu deck, do meu sideboard ou da minha coleção. Se uma carta muito boa não estiver em nenhuma, coloque-a numa lista à parte marcada "você não tem".\n3. Cada sugestão com a fonte (link) e a data. Marque como "inferência" o que for raciocínio seu e não vier de uma fonte.\n4. Com menos de 30 partidas, diga que o número é só uma pista. Se não achar fontes boas, diga isso em vez de inventar.\n5. Explique em passos curtos, em português.'
     ].join('\n\n');
   }
-  function matchupPanel(d, arch, r, date) {
-    var note = FU.sideNote(arch, r.o), lookup = collLookup();
+  function planHtml(d, note, lookup) {
+    var qn = function (x) { return (x.q ? x.q + '× ' : '') + esc(x.name); };
+    var sum = function (a) { return a.reduce(function (t, x) { return t + (x.q || 0); }, 0); };
+    var h = !note.plan.in.length ? '' : '<p class="small"><strong>Entra</strong></p><ul class="mu-cards">' + note.plan.in.map(function (x) {
+      return '<li><span class="nm">' + qn(x) + '</span> ' + noteStatusChip(FU.noteCardStatus(x.name, d, canonical, lookup)) + '</li>'; }).join('') + '</ul>';
+    if (note.plan.out.length) h += '<p class="small"><strong>Sai</strong></p><ul class="mu-cards">' + note.plan.out.map(function (x) {
+      var kk = FU.key(canonical(x.name)), inMain = d.cards.filter(function (c) { return c.board !== 'side' && c.board !== 'maybe' && FU.key(canonical(c.name)) === kk; }).reduce(function (t, c) { return t + c.qty; }, 0);
+      return '<li><span class="nm">' + qn(x) + '</span> ' + (!inMain ? chip('mid', 'Não achei no seu principal: ignore essa troca') : (x.q && inMain < x.q ? chip('mid', 'Você tem só ' + inMain + ' no principal') : chip('ok', 'No seu deck principal'))) + '</li>'; }).join('') + '</ul>';
+    return h + '<p class="xs">' + (note.partial ? 'O guia só nomeia parte das trocas, sem quantidades.' : 'Entram ' + sum(note.plan.in) + ' · saem ' + sum(note.plan.out) + '. As trocas são as do autor para a lista dele: confira com a sua.') + '</p>';
+  }
+  function userNote(d, opp) {
+    var u = d.mu && Object.prototype.hasOwnProperty.call(d.mu, opp) ? d.mu[opp] : null;
+    return u ? { plan: u.plan && (u.plan.in.length || u.plan.out.length) ? u.plan : null, lines: u.lines || [], src: u.src || [], partial: !!u.partial, unreadable: u.unreadable || 0, user: true } : null;
+  }
+  function matchupPanel(d, arch, r, date, user) {
+    var note = user ? userNote(d, r.o) : FU.sideNote(arch, r.o), lookup = collLookup();
     var h = '<div class="mu-panel"><p class="small"><strong>' + esc(arch) + ' × ' + esc(r.o) + '</strong>' + (r.wr == null ? '' : ': ' + r.wr + '% em ' + r.n + ' partidas' + (r.n < FU.META_SMALL ? ' (amostra pequena: use como pista)' : '')) + '.</p>';
     if (note) {
       h += note.lines.map(function (l) { return '<p class="small">' + esc(l) + '</p>'; }).join('');
-      var qn = function (x) { return (x.q ? x.q + '× ' : '') + esc(x.name); };
       if (note.plan) {
-        var sum = function (a) { return a.reduce(function (t, x) { return t + (x.q || 0); }, 0); };
-        h += '<p class="small"><strong>Entra</strong></p><ul class="mu-cards">' + note.plan.in.map(function (x) {
-          return '<li><span class="nm">' + qn(x) + '</span> ' + noteStatusChip(FU.noteCardStatus(x.name, d, canonical, lookup)) + '</li>'; }).join('') + '</ul>';
-        if (note.plan.out.length) h += '<p class="small"><strong>Sai</strong></p><ul class="mu-cards">' + note.plan.out.map(function (x) {
-          var kk = FU.key(canonical(x.name)), inMain = d.cards.filter(function (c) { return c.board !== 'side' && c.board !== 'maybe' && FU.key(canonical(c.name)) === kk; }).reduce(function (t, c) { return t + c.qty; }, 0);
-          return '<li><span class="nm">' + qn(x) + '</span> ' + (!inMain ? chip('mid', 'Não achei no seu principal: ignore essa troca') : (x.q && inMain < x.q ? chip('mid', 'Você tem só ' + inMain + ' no principal') : chip('ok', 'No seu deck principal'))) + '</li>'; }).join('') + '</ul>';
-        h += '<p class="xs">' + (note.partial ? 'O guia só nomeia parte das trocas, sem quantidades.' : 'Entram ' + sum(note.plan.in) + ' · saem ' + sum(note.plan.out) + '. As trocas são as do autor para a lista dele: confira com a sua.') + '</p>';
-      } else {
+        h += planHtml(d, note, lookup);
+      } else if (note.in && note.in.length) {
         h += '<p class="small"><strong>Cartas que o guia sugere trazer</strong></p><ul class="mu-cards">' + note.in.map(function (n) {
           return '<li><span class="nm">' + esc(n) + '</span> ' + noteStatusChip(FU.noteCardStatus(n, d, canonical, lookup)) + '</li>'; }).join('') + '</ul>';
       }
       if (note.expect) h += '<p class="small">' + esc(note.expect) + '</p>';
       if (note.infer) h += '<p class="small"><span class="chip mid">Inferência</span> ' + esc(note.infer.replace(/^Inferência minha:\s*/, '')) + '</p>';
-      h += '<p class="xs">Fontes: ' + note.src.map(function (s) { return '<a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.label) + '</a> (' + (s.date ? metaDateText(s.date) : 'sem data na página') + ')'; }).join(' · ') + '</p>';
+      if (note.unreadable) h += '<p class="small">' + chip('mid', note.unreadable + (note.unreadable === 1 ? ' linha ilegível' : ' linhas ilegíveis') + ' no print') + ' Confira no original.</p>';
+      h += '<p class="xs">' + (note.src.length ? 'Fontes: ' + note.src.map(function (s) { return s.url ? '<a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.label) + '</a> (' + (s.date ? metaDateText(s.date) : 'sem data na página') + ')' : esc(s.label); }).join(' · ') : 'Fonte não informada no print.') + '</p>';
     } else {
       h += '<p class="small">Ainda não tenho um guia conferido para este confronto, e não vou inventar. Peça à sua IA: o pedido já vai com o seu deck, o seu sideboard e a sua coleção.</p>';
     }
+    if (user) return h + '<p class="xs">Guia que você importou de um print, lido pela sua IA. Confira com o original.</p><button type="button" class="btn full" data-gdelmu="' + esc(d.id) + '|' + esc(r.o) + '">Remover este guia</button></div>';
     h += '<button type="button" class="btn primary full" data-muai="' + esc(d.id) + '|' + esc(r.o) + '">Pedir sugestão à IA (abre o Claude)</button>' +
       '<button type="button" class="btn full" data-mucopy="' + esc(d.id) + '|' + esc(r.o) + '">' + ICON.copy + 'Copiar o pedido</button>' +
       '<p class="xs"><a class="lnk" href="https://mtgdecks.net/Premodern/' + esc(encodeURIComponent(arch.toLowerCase().replace(/\s+/g, '-'))) + '" target="_blank" rel="noopener">Abrir ' + esc(arch) + ' no MTG Decks</a></p></div>';
@@ -2291,7 +2333,85 @@
     });
     return h;
   }
-  function matchupCard(d) {
+
+  /* ---------- "Como jogar" (primer) e importação de guias pela IA da pessoa ---------- */
+  function primerHtml(d) {
+    if (d.format === 'Lista') return '';
+    var p = d.primer, id = esc(d.id);
+    if (!p || !p.lines || !p.lines.length) {
+      return '<section class="primer empty" aria-labelledby="pmH"><h2 id="pmH">Como jogar com este deck</h2>' +
+        '<p class="small">Guarde aqui o plano de jogo: mulligan, combos, o que fazer em cada fase. Tire print de um guia, a sua IA lê e o app guarda.</p>' +
+        '<button type="button" class="btn full" data-guide="' + id + '">Importar de um guia, pela IA</button></section>';
+    }
+    var li = function (a) { return a.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join(''); };
+    var first = p.lines.slice(0, 4), rest = p.lines.slice(4);
+    return '<section class="primer" aria-labelledby="pmH"><div class="ph"><h2 id="pmH" tabindex="-1">Como jogar</h2><span class="xs">primer do deck</span></div>' +
+      '<ul class="plist">' + li(first) + '</ul>' +
+      (rest.length ? '<details class="small"><summary style="min-height:44px;display:flex;align-items:center;cursor:pointer"><strong>Ler tudo (+' + rest.length + ')</strong><span class="xs muted">&nbsp;· toque para abrir</span></summary><ul class="plist">' + li(rest) + '</ul></details>' : '') +
+      '<p class="xs">' + (p.src ? 'Fonte: ' + esc(p.src) : 'Fonte não informada no print') + ' · importado de um print: confira com o original.</p>' +
+      '<div class="pact"><button type="button" class="btn" data-guide="' + id + '">Importar outro</button><button type="button" class="btn" data-primerdel="' + id + '">Remover</button></div></section>';
+  }
+  var guideText = '', guideDraft = null;
+  function guideDeckInfo(d) { return { name: d.name, arch: d.format === 'Premodern' ? archOf(d) : '', format: d.format, main: deckLines(d, false), side: deckLines(d, true) }; }
+  function guideInputHtml(d) {
+    return '<h2 id="sheetTitle">Importar guia pela IA</h2>' +
+      '<ol class="small" style="padding-left:20px;display:grid;gap:6px"><li>Toque em <strong>Copiar pedido</strong>.</li><li>Cole na sua IA e anexe o print do guia.</li><li>Copie a resposta e cole aqui embaixo.</li></ol>' +
+      '<button type="button" class="btn primary full" data-gcopy style="margin-top:8px">' + ICON.copy + 'Copiar pedido</button>' +
+      '<button type="button" class="btn full" data-gai style="margin-top:8px">Abrir o Claude com o pedido</button>' +
+      '<label for="gIn" class="small" style="display:block;margin-top:16px"><strong>Resposta da IA</strong></label>' +
+      '<textarea id="gIn" aria-describedby="gMsg" spellcheck="false" autocapitalize="off" style="min-height:160px;margin-top:6px">' + esc(guideText) + '</textarea>' +
+      '<p class="xs muted" id="gMsg" role="status" style="margin-top:6px"></p>' +
+      '<button type="button" class="btn primary full" data-gcheck style="margin-top:8px">Conferir</button>';
+  }
+  function guidePreviewHtml(d, g) {
+    var lookup = collLookup(), h = '<h2 id="sheetTitle" tabindex="-1">Conferir antes de salvar</h2>';
+    if (g.primer) {
+      h += '<section class="gp"><h3 class="small"><strong>Como jogar</strong> · ' + g.primer.notes.length + (g.primer.notes.length === 1 ? ' tópico' : ' tópicos') + (d.primer ? ' · substitui o atual' : '') + '</h3><ul class="plist">' +
+        g.primer.notes.slice(0, 3).map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' +
+        (g.primer.notes.length > 3 ? '<p class="xs muted">e mais ' + (g.primer.notes.length - 3) + '.</p>' : '') +
+        (g.primer.src ? '<p class="xs muted">Fonte: ' + esc(g.primer.src) + '</p>' : '<p class="xs muted">Sem fonte no print.</p>') + '</section>';
+    }
+    g.guides.forEach(function (b) {
+      var t = FU.guideTotals(b), note = { plan: { in: b.in, out: b.out }, partial: !t.known };
+      h += '<section class="gp"><h3 class="small"><strong>Contra ' + esc(b.opp) + '</strong>' + (d.mu && Object.prototype.hasOwnProperty.call(d.mu, guideKey(d, b.opp)) ? ' · substitui o guia salvo' : '') + '</h3>' +
+        ((b.in.length || b.out.length) ? planHtml(d, note, lookup) : '') +
+        (t.known && !t.balanced ? '<p class="small">' + chip('mid', 'Entram ' + t.in + ' e saem ' + t.out + ': não bate. Confira o print.') + '</p>' : '') +
+        (b.notes.length ? '<ul class="plist">' + b.notes.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' : '') +
+        (b.unreadable.length ? '<p class="small">' + chip('mid', b.unreadable.length + (b.unreadable.length === 1 ? ' linha ilegível' : ' linhas ilegíveis')) + ' A IA não conseguiu ler. Confira no print.</p>' : '') +
+        (b.src ? '<p class="xs muted">Fonte: ' + esc(b.src) + '</p>' : '<p class="xs muted">Sem fonte no print.</p>') + '</section>';
+    });
+    if (g.skipped) h += '<p class="small">' + chip('mid', g.skipped + (g.skipped === 1 ? ' guia por adversário' : ' guias por adversário') + ' não entrou') + ' Esses guias só aparecem em decks Premodern.</p>';
+    if (g.dupes) h += '<p class="xs muted">' + g.dupes + (g.dupes === 1 ? ' confronto repetido' : ' confrontos repetidos') + ' na resposta: valeu o último de cada.</p>';
+    if (g.cut) h += '<p class="small">' + chip('mid', g.cut + ' confrontos além dos 30 primeiros não entraram') + '</p>';
+    if (g.ignored) h += '<p class="xs muted">Ignorei ' + g.ignored + (g.ignored === 1 ? ' linha' : ' linhas') + ' fora do formato (texto solto da IA).</p>';
+    return h + ((g.primer || g.guides.length) ? '<button type="button" class="btn primary full" data-gsave style="margin-top:12px">Salvar no deck</button>' : '') +
+      '<button type="button" class="btn full" data-gback style="margin-top:8px">Voltar e corrigir</button>';
+  }
+  function guideKey(d, opp) { var k = FU.noAcc(opp), ex = Object.keys(d.mu || {}).filter(function (x) { return FU.noAcc(x) === k; })[0]; return ex || clip(opp, 60); }
+  function clip(x, n) { x = String(x || '').trim(); return x.length > n ? x.slice(0, n - 1) + '…' : x; }
+  function guideSave(d, g) {
+    var now = Date.now();
+    if (g.primer && g.primer.notes.length) d.primer = { lines: g.primer.notes.slice(0, 60).map(function (x) { return clip(x, 400); }), src: clip(g.primer.src, 200), at: now };
+    g.guides.forEach(function (b) {
+      var t = FU.guideTotals(b), has = b.in.length || b.out.length, cp = function (a) { return a.slice(0, 40).map(function (x) { return { q: x.q, name: clip(x.name, 80) }; }); };
+      d.mu = d.mu || {};
+      d.mu[guideKey(d, b.opp)] = { plan: has ? { in: cp(b.in), out: cp(b.out) } : null, lines: b.notes.slice(0, 20).map(function (x) { return clip(x, 400); }), src: b.src ? [{ label: clip(b.src, 200) }] : [], partial: has ? !t.known : false, unreadable: b.unreadable.length, at: now };
+    });
+  }
+  function userGuideCard(d) {
+    var keys = d.format === 'Premodern' ? Object.keys(d.mu || {}) : [];
+    if (!keys.length) return '';
+    var arch = archOf(d) || 'Seu guia';
+    var h = '<section class="card pad stack mu" aria-labelledby="ugH" style="margin:16px"><h2 id="ugH" tabindex="-1" style="font-size:1.0625rem">Seus guias importados</h2>';
+    keys.forEach(function (o) {
+      var id = 'u|' + d.id + '|' + o, open = !!muOpen[id], u = d.mu[o], partial = !!u.partial;
+      h += '<button type="button" class="mu-row" data-mu="' + esc(id) + '" aria-expanded="' + open + '"><span class="o">' + esc(o) + '</span><span class="w">Guia</span>' +
+        '<span class="s">importado de um print' + (partial ? ' · sem todas as quantidades' : '') + ' · toque para ver o plano de sideboard</span></button>' + (open ? matchupPanel(d, arch, { o: o, wr: null, n: null }, null, true) : '');
+    });
+    return h + '</section>';
+  }
+  function matchupCard(d) { return matchupBase(d) + userGuideCard(d); }
+  function matchupBase(d) {
     if (d.format !== 'Premodern') return '';
     var arch = archOf(d), auto = FU.suggestArch(d.name);
     var h = '<section class="card pad stack mu" aria-labelledby="muH" style="margin:16px"><h2 id="muH" style="font-size:1.0625rem">Confrontos do deck</h2>' +
@@ -2397,6 +2517,7 @@
     persist(true);
     return { deck: d, skipped: parsed.skipped };
   }
+  function keepFocusSafe(v) { return String(v).replace(/["\\]/g, '\\$&'); }
   function keepFocus(sel) { var el = main.querySelector(sel); if (el) el.focus({ preventScroll: true }); }
 
   main.addEventListener('input', function (e) {
@@ -2443,6 +2564,20 @@
       var bc = t.getAttribute('data-buy');
       var bscope = bc === 'falta' ? (scopeDecks()) : [deckById(bc)];
       copyText(FU.toLigaMagic(FU.aggregateMissing(bscope, canonical)), 'Copiado. Cole no "Comprar por lista" da Liga Magic.');
+      return;
+    }
+    if (t.hasAttribute('data-guide')) { guideText = ''; openSheet('guide', t.getAttribute('data-guide'), t); return; }
+    if (t.hasAttribute('data-primerdel')) {
+      var pdk = deckById(t.getAttribute('data-primerdel'));
+      if (pdk && confirm('Remover o "Como jogar" deste deck? Os guias por adversário não mudam.')) { delete pdk.primer; persist(true); render(); toast('Removido.'); }
+      return;
+    }
+    if (t.hasAttribute('data-gdelmu')) {
+      var gv = t.getAttribute('data-gdelmu').split('|'), gdd = deckById(gv[0]), go = gv.slice(1).join('|');
+      if (gdd && gdd.mu && gdd.mu[go] && confirm('Remover o guia contra ' + go + '? Os guias conferidos do app não mudam.')) {
+        delete gdd.mu[go]; if (!Object.keys(gdd.mu).length) delete gdd.mu; delete muOpen['u|' + gdd.id + '|' + go];
+        persist(true); render(); toast('Guia removido.');
+      }
       return;
     }
     if (t.hasAttribute('data-sheet')) { openSheet(t.getAttribute('data-sheet'), t.getAttribute('data-ctx'), t); return; }
@@ -2508,7 +2643,7 @@
       toast(pd.pinned ? 'Deck fixado no topo.' : 'Deck desafixado.'); return;
     }
     if (t.hasAttribute('data-musort')) { state.ui.muBest = !state.ui.muBest; persist(false); var ys = window.scrollY; render(); window.scrollTo(0, ys); keepFocus('[data-musort]'); return; }
-    if (t.hasAttribute('data-mu')) { var mk = t.getAttribute('data-mu'); muOpen[mk] = !muOpen[mk]; render(); keepFocus('[data-mu="' + mk.replace(/"/g, '\\"') + '"]'); return; }
+    if (t.hasAttribute('data-mu')) { var mk = t.getAttribute('data-mu'); muOpen[mk] = !muOpen[mk]; render(); keepFocus('[data-mu="' + keepFocusSafe(mk) + '"]'); return; }
     if (t.hasAttribute('data-muai') || t.hasAttribute('data-mucopy')) {
       var mv = (t.getAttribute('data-muai') || t.getAttribute('data-mucopy')).split('|'), md = deckById(mv[0]);
       var ma = md ? archOf(md) : '', me = ma ? FU.metaEntry(state.meta, ma) : null;
